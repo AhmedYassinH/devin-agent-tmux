@@ -11,7 +11,6 @@ const LABEL: Record<PaneStatus, string> = {
 export function StatusBadge({ status }: { status: PaneStatus }) {
   return (
     <span className={`badge badge-${status}`} title={`Devin session is ${LABEL[status]}`}>
-      <i className="dot" />
       {LABEL[status]}
     </span>
   );

@@ -88,8 +88,10 @@ export function SessionPicker({
         </ul>
 
         <footer className="muted">
-          Locked sessions are open in a running process. Devin allows one holder at a time, so their
-          transcript can be read once that pane is closed.
+          Resuming opens the session in its <strong>own new workspace</strong>, at the directory it
+          originally ran in — <code>devin -r</code> only works from there. Locked sessions are open
+          in a running process; Devin allows one holder at a time, so their transcript can be read
+          once that pane is closed.
         </footer>
       </div>
     </div>

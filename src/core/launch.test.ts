@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildDevinLaunch, shellEscape, shellLaunchArgs } from './launch.js';
+import { DEFAULT_PERMISSION_MODE } from './models.js';
 
 describe('buildDevinLaunch', () => {
   it('is a bare interactive devin with no config', () => {
@@ -50,5 +51,20 @@ describe('shellLaunchArgs', () => {
   });
   it('is empty with no command', () => {
     expect(shellLaunchArgs(undefined, false)).toEqual([]);
+  });
+});
+
+describe('DEFAULT_PERMISSION_MODE', () => {
+  it('launches panes with edits auto-approved', () => {
+    // The launch form no longer asks; this constant is the single place the
+    // posture is decided, so it is worth asserting rather than assuming.
+    expect(buildDevinLaunch({ permissionMode: DEFAULT_PERMISSION_MODE })).toBe(
+      'devin --permission-mode accept-edits',
+    );
+  });
+
+  it('is not a blanket approval — shell commands still raise a request', () => {
+    // `dangerous` would auto-approve everything and silence the `waiting` badge.
+    expect(DEFAULT_PERMISSION_MODE).not.toBe('dangerous');
   });
 });

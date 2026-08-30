@@ -77,13 +77,22 @@ export function setLeafAt(node: LayoutNode, index: number, sessionId: string | n
   return walk(node);
 }
 
-/** Clear whichever leaf holds `sessionId`. The slot stays, so the grid keeps its shape. */
-export function clearSession(node: LayoutNode, sessionId: string): LayoutNode {
-  const walk = (n: LayoutNode): LayoutNode => {
-    if (n.type === 'leaf') return n.sessionId === sessionId ? { type: 'leaf', sessionId: null } : n;
-    return { ...n, children: n.children.map(walk) };
-  };
-  return walk(node);
+/**
+ * Build the layout for exactly these panes, in order.
+ *
+ * Used when the pane count changes — closing a pane RESHAPES the grid rather
+ * than leaving a hole where the terminal was. An empty slot left behind reads
+ * as "something is still here", and the Terminals count would disagree with
+ * what is on screen.
+ *
+ * Clamped to one leaf: with no panes left you still need a slot to launch from.
+ */
+export function layoutForSessions(sessionIds: string[]): LayoutNode {
+  let layout = templateLayout(templateForCount(Math.max(1, sessionIds.length)));
+  sessionIds.forEach((id, i) => {
+    layout = setLeafAt(layout, i, id);
+  });
+  return layout;
 }
 
 /**

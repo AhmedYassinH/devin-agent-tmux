@@ -1,30 +1,40 @@
 /**
- * Workspace create / rename card.
+ * Naming card — create a workspace, rename a workspace, or rename a session.
  *
  * Replaces the browser `prompt()` chain, which was not only ugly but actively
  * misleading: it asked for a name and a directory in two sequential modals with
  * no way to see or correct the first once the second appeared, and it offered no
  * room to say that the directory must be a real absolute path — the exact
  * mistake that produced a pane dying with `exit code 1`.
+ *
+ * One component for all three cases because they differ only in title, in
+ * whether a directory field appears, and in what the caller does with the
+ * result. Splitting them would triplicate the focus, Esc and validation logic.
  */
 import { useEffect, useRef, useState } from 'react';
 
-export type WorkspaceDialogMode =
-  | { mode: 'create'; defaultCwd: string }
-  | { mode: 'rename'; id: string; name: string };
+export type NameDialogSpec =
+  | { mode: 'create-workspace'; defaultCwd: string }
+  | { mode: 'rename-workspace'; id: string; name: string }
+  | { mode: 'rename-session'; wsId: string; id: string; name: string };
 
-export function WorkspaceDialog({
+const TITLE: Record<NameDialogSpec['mode'], string> = {
+  'create-workspace': 'New workspace',
+  'rename-workspace': 'Rename workspace',
+  'rename-session': 'Rename session',
+};
+
+export function NameDialog({
   spec,
   onCancel,
-  onCreate,
-  onRename,
+  onSubmit,
 }: {
-  spec: WorkspaceDialogMode;
+  spec: NameDialogSpec;
   onCancel: () => void;
-  onCreate: (name: string, cwd: string) => void;
-  onRename: (id: string, name: string) => void;
+  /** `cwd` is only meaningful for create-workspace; otherwise it is ''. */
+  onSubmit: (name: string, cwd: string) => void;
 }) {
-  const creating = spec.mode === 'create';
+  const creating = spec.mode === 'create-workspace';
   const [name, setName] = useState(creating ? '' : spec.name);
   const [cwd, setCwd] = useState(creating ? spec.defaultCwd : '');
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -34,8 +44,7 @@ export function WorkspaceDialog({
     nameRef.current?.select();
   }, []);
 
-  // Esc closes from anywhere in the card, matching the modal convention the
-  // session picker already follows.
+  // Esc closes from anywhere in the card, matching the session picker.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
@@ -51,15 +60,14 @@ export function WorkspaceDialog({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid) return;
-    if (creating) onCreate(trimmedName, trimmedCwd);
-    else onRename(spec.id, trimmedName);
+    onSubmit(trimmedName, trimmedCwd);
   };
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <form className="modal card" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <header>
-          <h2>{creating ? 'New workspace' : 'Rename workspace'}</h2>
+          <h2>{TITLE[spec.mode]}</h2>
           <button type="button" className="ghost" onClick={onCancel} aria-label="Close">
             ✕
           </button>
@@ -71,8 +79,14 @@ export function WorkspaceDialog({
             ref={nameRef}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="api-fix"
+            placeholder={spec.mode === 'rename-session' ? 'auth-refactor' : 'api-fix'}
           />
+          {spec.mode === 'rename-session' && (
+            <small className="muted">
+              A label for you. Devin&rsquo;s own session id is unchanged, so resuming this
+              conversation later still works.
+            </small>
+          )}
         </label>
 
         {creating && (

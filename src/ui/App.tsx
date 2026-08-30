@@ -6,9 +6,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AppState,
-  type DevinPermissionMode,
   type PaneStatus,
   type SessionConfig,
+  DEFAULT_PERMISSION_MODE,
   emptyState,
   makeId,
 } from '../core/models.js';
@@ -17,6 +17,8 @@ import {
   addSession,
   applyTemplate,
   createWorkspace,
+  dirBasename,
+  uniqueWorkspaceName,
   removeSession,
   removeWorkspace,
   renameWorkspace,
@@ -34,8 +36,10 @@ import { TerminalPane } from './TerminalPane.js';
 import { PaneLauncher, type LaunchRequest } from './PaneLauncher.js';
 import { SessionPicker } from './SessionPicker.js';
 import { TracePanel } from './TracePanel.js';
-import { WorkspaceDialog, type WorkspaceDialogMode } from './WorkspaceDialog.js';
+import { NameDialog, type NameDialogSpec } from './NameDialog.js';
+import { Guide } from './Guide.js';
 import { ContextBadge, StatusBadge } from './StatusBadge.js';
+import { tintForIndex } from './theme.js';
 
 const backend = new Backend();
 
@@ -47,9 +51,39 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [trace, setTrace] = useState<{ sessionId: string; cwd: string } | null>(null);
   const [maximized, setMaximized] = useState<string | null>(null);
+  /**
+   * Which pane the tab strip is showing. Separate from `maximized`: maximizing
+   * in Grid and selecting in Tabs are different intents, and conflating them
+   * meant Tabs rendered every pane at once until you happened to click one.
+   */
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   // Real paths from the server: the browser cannot resolve `~` or know a cwd.
   const [env, setEnv] = useState<{ home: string; cwd: string } | null>(null);
-  const [dialog, setDialog] = useState<WorkspaceDialogMode | null>(null);
+  const [dialog, setDialog] = useState<NameDialogSpec | null>(null);
+  /**
+   * Show the guide unprompted on a first visit, then never again.
+   *
+   * localStorage is the right home for this: it is a per-viewer convenience, not
+   * state anything else needs to read. Wrapped because the accessor itself
+   * throws in a private window or with site data blocked — in which case we show
+   * the guide, which is the harmless direction to be wrong in.
+   */
+  const [guide, setGuide] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('devin-mux.guide-seen') !== '1';
+    } catch {
+      return true;
+    }
+  });
+
+  const closeGuide = useCallback(() => {
+    setGuide(false);
+    try {
+      localStorage.setItem('devin-mux.guide-seen', '1');
+    } catch {
+      // Nothing to do: the guide simply reappears next time.
+    }
+  }, []);
 
   // Suppress the save that a server-pushed state would otherwise trigger,
   // which would bounce the same state back and forth between two open tabs.
@@ -101,7 +135,7 @@ export function App() {
   const active = state.activeWorkspaceId ? state.workspaces[state.activeWorkspaceId] : undefined;
 
   const spawn = useCallback(
-    (wsId: string, session: SessionConfig, opts: { shellOnly?: boolean }) => {
+    (session: SessionConfig, opts: { shellOnly?: boolean }) => {
       backend.send({
         t: 'pane:spawn',
         paneId: session.id,
@@ -122,40 +156,58 @@ export function App() {
   const launch = useCallback(
     (req: LaunchRequest) => {
       if (!active) return;
+      // No model, prompt or permission mode: the pane is the real TUI, so those
+      // are set there. buildDevinLaunch still supports every flag.
       const session: SessionConfig = {
         id: makeId('pane'),
         name: req.name,
         cwd: req.cwd,
-        model: req.model,
-        permissionMode: req.permissionMode,
-        prompt: req.prompt,
+        permissionMode: DEFAULT_PERMISSION_MODE,
         createdAt: Date.now(),
       };
       setState((prev) => addSession(prev, active.id, session));
-      spawn(active.id, session, { shellOnly: req.shellOnly });
+      spawn(session, { shellOnly: req.shellOnly });
+      setActiveTab(session.id);
     },
     [active, spawn],
   );
 
+  /**
+   * Import a past session into a workspace of its OWN.
+   *
+   * Not the active workspace: `devin -r` must run in the session's original
+   * working directory, so an imported pane's cwd is almost never the current
+   * workspace's. Dropping it there would produce a workspace whose panes do not
+   * share its directory — the cwd in the toolbar would be a lie, and the next
+   * pane launched from it would start somewhere else entirely.
+   */
   const resume = useCallback(
     (summary: AcpSessionSummary) => {
-      if (!active) return;
       const session: SessionConfig = {
         id: makeId('pane'),
         name: summary.title?.slice(0, 40),
-        // Resume must run from the session's ORIGINAL directory, not the
-        // workspace default — Devin scopes sessions by working directory.
         cwd: summary.cwd,
-        permissionMode: 'auto',
+        permissionMode: DEFAULT_PERMISSION_MODE,
         resumeSessionId: summary.sessionId,
         devinSessionId: summary.sessionId,
         createdAt: Date.now(),
       };
-      setState((prev) => addSession(prev, active.id, session));
-      spawn(active.id, session, {});
+
+      setState((prev) => {
+        // createWorkspace makes the new workspace active, which is how we learn
+        // the id it generated.
+        const named = uniqueWorkspaceName(prev, dirBasename(summary.cwd));
+        const withWorkspace = createWorkspace(prev, named, summary.cwd);
+        const wsId = withWorkspace.activeWorkspaceId;
+        return wsId ? addSession(withWorkspace, wsId, session) : withWorkspace;
+      });
+
+      spawn(session, {});
+      setActiveTab(session.id);
+      setMaximized(null);
       setPicker(false);
     },
-    [active, spawn],
+    [spawn],
   );
 
   const closeSession = useCallback((wsId: string, sessionId: string) => {
@@ -166,8 +218,30 @@ export function App() {
   // Default to a directory that actually exists: the server's cwd, else home.
   // `~` alone is shell syntax, and a process spawned into it dies before it runs.
   const newWorkspace = useCallback(() => {
-    setDialog({ mode: 'create', defaultCwd: active?.cwd ?? env?.cwd ?? env?.home ?? '' });
+    setDialog({ mode: 'create-workspace', defaultCwd: active?.cwd ?? env?.cwd ?? env?.home ?? '' });
   }, [active, env]);
+
+  /**
+   * The tab actually on screen. Falls back to the first pane so the strip always
+   * has exactly one selection, including right after a workspace switch or when
+   * the selected pane was closed.
+   */
+  const currentTab = useMemo(() => {
+    if (!active) return null;
+    if (activeTab && active.sessions[activeTab]) return activeTab;
+    return active.sessionOrder[0] ?? null;
+  }, [active, activeTab]);
+
+  /**
+   * Agents blocked on a human, across every workspace. This drives the red
+   * banner callout: in 1996 the phone number sat top-right because calling was
+   * the action the page existed to provoke. Here, the thing demanding action is
+   * an agent waiting on you.
+   */
+  const waitingCount = useMemo(
+    () => Object.values(statuses).filter((s) => s === 'waiting').length,
+    [statuses],
+  );
 
   /** Pane capacity of the current layout — the Terminals dropdown's value. */
   const paneCount = useMemo(() => (active ? leafCount(active.layout) : 1), [active]);
@@ -182,11 +256,21 @@ export function App() {
     const session = active.sessions[sessionId];
     if (!session) return null;
 
+    // Each pane owns a catalog tint the way each Dell product line did. Keyed on
+    // position so neighbouring panes always differ.
+    const tint = tintForIndex(active.sessionOrder.indexOf(sessionId));
+    const status = statuses[sessionId] ?? 'idle';
+
     return (
-      <div className={`pane ${maximized === sessionId ? 'maximized' : ''}`} key={sessionId}>
+      <div
+        className={`pane tint-${tint} ${maximized === sessionId ? 'maximized' : ''}`}
+        key={sessionId}
+      >
+        {/* new-burst-sticker: taped on at an angle when the agent is blocked */}
+        {status === 'waiting' && <span className="burst">Needs you!</span>}
         <header className="pane-head">
           <span className="pane-name">{session.name || session.devinSessionId || 'devin'}</span>
-          <StatusBadge status={statuses[sessionId] ?? 'idle'} />
+          <StatusBadge status={status} />
           <ContextBadge health={healths[sessionId]} />
           <span className="spacer" />
           {session.devinSessionId && (
@@ -212,6 +296,27 @@ export function App() {
 
   return (
     <div className="app">
+      {/* top-banner: black strip, Helvetica caps, red callout + yellow sticker */}
+      <header className="banner">
+        <span className="banner-brand">Devin&middot;Agent&middot;Tmux</span>
+        <span className="banner-tag">Run many agents. In parallel.</span>
+        <span className="spacer" />
+        <span
+          className={waitingCount > 0 ? 'callout' : 'callout quiet'}
+          title="Agents blocked on your input"
+        >
+          {waitingCount > 0 ? `${waitingCount} agent${waitingCount === 1 ? '' : 's'} waiting` : 'No agents waiting'}
+        </span>
+        <button className="banner-link" onClick={() => setGuide(true)} title="How this works">
+          Guide
+        </button>
+        {/* buy-a-dell-sticker slot: the page's primary entry action */}
+        <button className="sticker" onClick={newWorkspace}>
+          + New workspace
+        </button>
+      </header>
+
+      <div className="body-row">
       <Sidebar
         state={state}
         statuses={statuses}
@@ -221,7 +326,20 @@ export function App() {
         onNewWorkspace={newWorkspace}
         onRequestRename={(id) => {
           const ws = state.workspaces[id];
-          if (ws) setDialog({ mode: 'rename', id, name: ws.name });
+          if (ws) setDialog({ mode: 'rename-workspace', id, name: ws.name });
+        }}
+        onRequestRenameSession={(wsId, sessionId) => {
+          const session = state.workspaces[wsId]?.sessions[sessionId];
+          if (session) {
+            setDialog({
+              mode: 'rename-session',
+              wsId,
+              id: sessionId,
+              // Seed with whatever the row already shows, so a rename edits the
+              // visible label rather than starting from an empty field.
+              name: session.name || session.devinSessionId || '',
+            });
+          }
         }}
         onCloseWorkspace={(id) => {
           const ws = state.workspaces[id];
@@ -231,7 +349,7 @@ export function App() {
         onSelectSession={(wsId, sid) => {
           setState((p) => ({ ...p, activeWorkspaceId: wsId }));
           setMaximized(null);
-          document.getElementById(`pane-${sid}`)?.scrollIntoView({ block: 'nearest' });
+          setActiveTab(sid);
         }}
         onCloseSession={closeSession}
       />
@@ -239,11 +357,18 @@ export function App() {
       <main className="main">
         {!active ? (
           <div className="empty-state">
-            <h1>devin-agent-tmux</h1>
-            <p>Run several Devin CLI sessions side by side, in the browser.</p>
-            <button className="primary" onClick={newWorkspace}>
-              Create a workspace
-            </button>
+            <h1>Agent Workspaces</h1>
+            {/* cta-block-red: one per page, maximum. The singular attention pole. */}
+            <div className="cta-red">
+              <p>
+                A workspace is a named group of Devin sessions with its own layout and a default
+                working directory. Point one at a project, pick how many terminals you want, and run
+                several agents side by side &mdash; each with its own status, context budget and
+                transcript.
+              </p>
+              <button onClick={newWorkspace}>Create a workspace</button>
+              <button onClick={() => setPicker(true)}>Resume a past session</button>
+            </div>
           </div>
         ) : (
           <>
@@ -311,8 +436,9 @@ export function App() {
                     {active.sessionOrder.map((sid) => (
                       <button
                         key={sid}
-                        className={maximized === sid ? 'tab active' : 'tab'}
-                        onClick={() => setMaximized(sid)}
+                        className={currentTab === sid ? 'tab active' : 'tab'}
+                        aria-selected={currentTab === sid}
+                        onClick={() => setActiveTab(sid)}
                       >
                         {active.sessions[sid]?.name || sid}
                         <StatusBadge status={statuses[sid] ?? 'idle'} />
@@ -321,9 +447,9 @@ export function App() {
                   </div>
                   <div className="tab-body">
                     {/* Every pane stays mounted; only visibility changes, so
-                        switching tabs never restarts a PTY. */}
+                        switching tabs never restarts a PTY or loses scrollback. */}
                     {active.sessionOrder.map((sid) => (
-                      <div key={sid} hidden={maximized !== null && maximized !== sid} className="tab-pane">
+                      <div key={sid} hidden={sid !== currentTab} className="tab-pane">
                         {renderPane(sid, sid)}
                       </div>
                     ))}
@@ -335,6 +461,18 @@ export function App() {
           </>
         )}
       </main>
+      </div>
+
+      {/* footer-band: classic-blue anchors and small print, as every 1996 page had */}
+      <footer className="footer-band">
+        <span>
+          Local-first. Your agents run on this machine &mdash; nothing is uploaded.
+        </span>
+        <span className="spacer" />
+        <span className="muted small">
+          Best viewed with browser versions 3.0 and higher.
+        </span>
+      </footer>
 
       {trace && (
         <TracePanel
@@ -345,25 +483,32 @@ export function App() {
         />
       )}
 
+      {guide && <Guide onClose={closeGuide} />}
+
       {dialog && (
-        <WorkspaceDialog
+        <NameDialog
           spec={dialog}
           onCancel={() => setDialog(null)}
-          onCreate={(name, cwd) => {
-            setState((p) => createWorkspace(p, name, cwd));
-            setDialog(null);
-          }}
-          onRename={(id, name) => {
-            setState((p) => renameWorkspace(p, id, name));
+          onSubmit={(name, cwd) => {
+            setState((p) => {
+              switch (dialog.mode) {
+                case 'create-workspace':
+                  return createWorkspace(p, name, cwd);
+                case 'rename-workspace':
+                  return renameWorkspace(p, dialog.id, name);
+                case 'rename-session':
+                  return updateSession(p, dialog.wsId, dialog.id, { name });
+              }
+            });
             setDialog(null);
           }}
         />
       )}
 
-      {picker && active && (
+      {picker && (
         <SessionPicker
           backend={backend}
-          cwd={active.cwd}
+          cwd={active?.cwd ?? env?.cwd ?? env?.home ?? '.'}
           onResume={resume}
           onTrace={(s) => {
             setTrace({ sessionId: s.sessionId, cwd: s.cwd });

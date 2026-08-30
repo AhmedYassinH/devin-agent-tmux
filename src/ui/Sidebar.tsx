@@ -14,6 +14,7 @@ export function Sidebar({
   onSelectWorkspace,
   onNewWorkspace,
   onRequestRename,
+  onRequestRenameSession,
   onCloseWorkspace,
   onSelectSession,
   onCloseSession,
@@ -25,6 +26,7 @@ export function Sidebar({
   onSelectWorkspace: (id: string) => void;
   onNewWorkspace: () => void;
   onRequestRename: (id: string) => void;
+  onRequestRenameSession: (wsId: string, sessionId: string) => void;
   onCloseWorkspace: (id: string) => void;
   onSelectSession: (wsId: string, sessionId: string) => void;
   onCloseSession: (wsId: string, sessionId: string) => void;
@@ -92,6 +94,14 @@ export function Sidebar({
                   {ws.name}
                   {attention && <i className="attention" />}
                 </button>
+                <button
+                  className="ghost"
+                  onClick={() => onRequestRename(id)}
+                  title="Rename workspace"
+                  aria-label={`Rename workspace ${ws.name}`}
+                >
+                  ✎
+                </button>
                 <button className="ghost" onClick={() => onCloseWorkspace(id)} title="Close workspace">
                   ✕
                 </button>
@@ -104,9 +114,21 @@ export function Sidebar({
                     if (!session) return null;
                     return (
                       <li key={sid}>
-                        <button className="session-row" onClick={() => onSelectSession(id, sid)}>
+                        <button
+                          className="session-row"
+                          onClick={() => onSelectSession(id, sid)}
+                          onDoubleClick={() => onRequestRenameSession(id, sid)}
+                        >
                           <span className="name">{session.name || session.devinSessionId || sid}</span>
                           <StatusBadge status={statuses[sid] ?? 'idle'} />
+                        </button>
+                        <button
+                          className="ghost"
+                          onClick={() => onRequestRenameSession(id, sid)}
+                          title="Rename session"
+                          aria-label={`Rename session ${session.name || sid}`}
+                        >
+                          ✎
                         </button>
                         <button className="ghost" onClick={() => onCloseSession(id, sid)} title="Close pane">
                           ✕
