@@ -35,14 +35,38 @@ export interface HookMatcher {
 }
 export type HooksConfig = Record<string, HookMatcher[]>;
 
-/** Events we bind, and the argument our hook script receives for each. */
-export const HOOK_EVENTS: { event: string; arg: string }[] = [
-  { event: 'SessionStart', arg: 'session' },
-  { event: 'UserPromptSubmit', arg: 'running' },
-  { event: 'Stop', arg: 'idle' },
-  { event: 'PermissionRequest', arg: 'waiting' },
-  { event: 'PostToolUse', arg: 'running' },
-  { event: 'SessionEnd', arg: 'exited' },
+/**
+ * Devin's tools that BLOCK on a human answer.
+ *
+ * `matcher` is a regex over the hook event's `tool_name`, so these are anchored
+ * to avoid matching a longer name that merely contains one of them.
+ *
+ * This is the second, easily-missed half of "the agent needs you". A permission
+ * request is not the only way an agent stops: it can also ask a question
+ * (`ask_user_question` — "which colour theme?") or put a plan up for approval
+ * (`exit_plan_mode`). Neither raises `PermissionRequest`, because neither is a
+ * permission decision — they are ordinary tool calls that happen to wait on a
+ * person. Binding only `PermissionRequest` left a card sitting in In Progress
+ * with a question on screen and nothing signalling it.
+ */
+export const BLOCKING_TOOLS = ['ask_user_question', 'exit_plan_mode'] as const;
+export const BLOCKING_TOOL_MATCHER = `^(${BLOCKING_TOOLS.join('|')})$`;
+
+/**
+ * Events we bind, the argument our hook script receives, and the tool-name
+ * regex that scopes it. An empty matcher matches every tool name, which is what
+ * Devin's docs specify and what all the non-tool events want.
+ */
+export const HOOK_EVENTS: { event: string; arg: string; matcher: string }[] = [
+  { event: 'SessionStart', arg: 'session', matcher: '' },
+  { event: 'UserPromptSubmit', arg: 'running', matcher: '' },
+  { event: 'Stop', arg: 'idle', matcher: '' },
+  { event: 'PermissionRequest', arg: 'waiting', matcher: '' },
+  // The agent is about to block on a human. PostToolUse below returns it to
+  // running once the answer lands, because the tool only completes when it does.
+  { event: 'PreToolUse', arg: 'waiting', matcher: BLOCKING_TOOL_MATCHER },
+  { event: 'PostToolUse', arg: 'running', matcher: '' },
+  { event: 'SessionEnd', arg: 'exited', matcher: '' },
 ];
 
 /**
@@ -56,13 +80,15 @@ export const HOOK_EVENTS: { event: string; arg: string }[] = [
  */
 export function devinStatusHooks(scriptPath: string): HooksConfig {
   const config: HooksConfig = {};
-  for (const { event, arg } of HOOK_EVENTS) {
-    config[event] = [
-      {
-        matcher: '',
-        hooks: [{ type: 'command', command: `node ${JSON.stringify(scriptPath)} ${arg}`, timeout: 5 }],
-      },
-    ];
+  for (const { event, arg, matcher } of HOOK_EVENTS) {
+    const entry: HookMatcher = {
+      matcher,
+      hooks: [{ type: 'command', command: `node ${JSON.stringify(scriptPath)} ${arg}`, timeout: 5 }],
+    };
+    // Append rather than assign: two of our own bindings can share an event
+    // (PreToolUse and PostToolUse are distinct, but this keeps the loop honest
+    // if a future signal needs a second matcher on an event already bound).
+    config[event] = [...(config[event] ?? []), entry];
   }
   return config;
 }

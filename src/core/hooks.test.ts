@@ -64,3 +64,35 @@ describe('composeSessionConfig', () => {
     expect(merged.hooks).toBeDefined();
   });
 });
+
+describe('blocking-tool hooks — the other half of "the agent needs you"', () => {
+  const hooks = devinStatusHooks('/tmp/hook.mjs');
+
+  it('reports waiting when the agent asks the user a question', () => {
+    // Regression: a card sat in In Progress with "which colour theme?" on screen.
+    // ask_user_question is an ordinary TOOL, not a permission decision, so
+    // PermissionRequest never fired and nothing signalled that it was blocked.
+    const pre = hooks.PreToolUse?.[0];
+    expect(pre).toBeDefined();
+    expect(pre?.hooks[0]?.command).toBe('node "/tmp/hook.mjs" waiting');
+  });
+
+  it('scopes that hook to the tools that actually block', () => {
+    const matcher = new RegExp(hooks.PreToolUse?.[0]?.matcher ?? '');
+    expect(matcher.test('ask_user_question')).toBe(true);
+    expect(matcher.test('exit_plan_mode')).toBe(true);
+    // Anchored: a tool merely CONTAINING a blocking name must not match, or
+    // every pane would sit on waiting through ordinary work.
+    expect(matcher.test('exec')).toBe(false);
+    expect(matcher.test('read')).toBe(false);
+    expect(matcher.test('subagent_no_question')).toBe(false);
+  });
+
+  it('returns to running once the answer lands', () => {
+    // PostToolUse matches all tools, and the blocking tool only COMPLETES when
+    // the human has answered — so the same event that ends the block clears it.
+    const post = hooks.PostToolUse?.[0];
+    expect(post?.matcher).toBe('');
+    expect(post?.hooks[0]?.command).toBe('node "/tmp/hook.mjs" running');
+  });
+});

@@ -23,11 +23,27 @@ export type CardDialogSpec =
   | { mode: 'create'; defaultCwd: string; hasDefaultContextKey: boolean }
   | { mode: 'edit'; card: Card; hasDefaultContextKey: boolean };
 
+/**
+ * Devin's permission ladder, in ASCENDING autonomy — the order the list must be
+ * read in for the choice to make sense.
+ *
+ * Taken verbatim from `devin --permission-mode`: "auto auto-approves read-only
+ * tools, accept-edits also auto-approves workspace edits, smart additionally
+ * auto-runs actions a fast model judges safe, dangerous auto-approves all
+ * tools." `auto` is therefore the LEAST permissive of the four, not the most —
+ * this list previously sat it between smart and dangerous and described it as
+ * "runs most things without asking", which is backwards, and pointed anyone
+ * looking for an unattended ticket at the mode that interrupts most.
+ *
+ * Each hint says what the mode ASKS about, not just what it allows, because on
+ * the board that is the consequential half: a mode that never asks never raises
+ * a PermissionRequest hook, so its card can never reach Attention.
+ */
 const AUTONOMY: { value: DevinPermissionMode; label: string; hint: string }[] = [
-  { value: 'accept-edits', label: 'Accept edits', hint: 'Writes files freely; still asks before running commands.' },
-  { value: 'smart', label: 'Smart', hint: 'A fast model judges each action — a middle ground.' },
-  { value: 'auto', label: 'Auto', hint: 'Runs most things without asking. Good for unattended tickets.' },
-  { value: 'dangerous', label: 'Bypass', hint: 'Approves everything. Only in a trusted, disposable checkout.' },
+  { value: 'auto', label: 'Auto', hint: 'Auto-approves read-only tools. Asks before edits and commands — the most interruptive.' },
+  { value: 'accept-edits', label: 'Accept edits', hint: 'Also writes files freely. Still asks before running commands.' },
+  { value: 'smart', label: 'Smart', hint: 'Additionally auto-runs actions a fast model judges safe.' },
+  { value: 'dangerous', label: 'Bypass', hint: 'Approves everything, so it never stops for you — this card will never reach Attention. Trusted, disposable checkouts only.' },
 ];
 
 export function CardDialog({
