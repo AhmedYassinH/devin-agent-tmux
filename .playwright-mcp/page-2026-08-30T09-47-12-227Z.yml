@@ -1,0 +1,142 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Devin Agent Tmux
+    - generic [ref=e9]: Run many agents. In parallel.
+    - generic "Agents blocked on your input" [ref=e10]: none waiting
+    - button "Guide" [ref=e11] [cursor=pointer]
+    - button "New workspace" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - navigation [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]: Workspaces
+          - generic [ref=e19]: "3"
+        - button "Collapse sidebar" [ref=e20] [cursor=pointer]: «
+      - button "New workspace" [ref=e21] [cursor=pointer]
+      - list [ref=e35]:
+        - listitem [ref=e36]:
+          - generic [ref=e37]:
+            - button "▾" [ref=e38] [cursor=pointer]
+            - button "NewPLAce" [ref=e39] [cursor=pointer]
+            - button "Rename workspace NewPLAce" [ref=e41] [cursor=pointer]: ✎
+            - button "Close workspace NewPLAce" [ref=e42] [cursor=pointer]: ✕
+          - list [ref=e43]:
+            - listitem [ref=e44]:
+              - button "skinny-belief idle" [ref=e45] [cursor=pointer]:
+                - generic [ref=e46]: skinny-belief
+                - generic "Devin session is idle" [ref=e47]: idle
+              - button "Rename session pane-hfnf5n4w" [ref=e50] [cursor=pointer]: ✎
+              - button "Close pane pane-hfnf5n4w" [ref=e51] [cursor=pointer]: ✕
+            - listitem [ref=e52]:
+              - button "tricky-gray idle" [ref=e53] [cursor=pointer]:
+                - generic [ref=e54]: tricky-gray
+                - generic "Devin session is idle" [ref=e55]: idle
+              - button "Rename session pane-sjxy510k" [ref=e58] [cursor=pointer]: ✎
+              - button "Close pane pane-sjxy510k" [ref=e59] [cursor=pointer]: ✕
+            - listitem [ref=e60]:
+              - button "infrequent-scene idle" [ref=e61] [cursor=pointer]:
+                - generic [ref=e62]: infrequent-scene
+                - generic "Devin session is idle" [ref=e63]: idle
+              - button "Rename session pane-srjdlakt" [ref=e66] [cursor=pointer]: ✎
+              - button "Close pane pane-srjdlakt" [ref=e67] [cursor=pointer]: ✕
+        - listitem [ref=e68]:
+          - generic [ref=e69]:
+            - button "▾" [ref=e70] [cursor=pointer]
+            - button "heyDebby" [ref=e71] [cursor=pointer]
+            - button "Rename workspace heyDebby" [ref=e73] [cursor=pointer]: ✎
+            - button "Close workspace heyDebby" [ref=e74] [cursor=pointer]: ✕
+          - list [ref=e75]:
+            - listitem [ref=e76]:
+              - button "Greeting idle" [ref=e77] [cursor=pointer]:
+                - generic [ref=e78]: Greeting
+                - generic "Devin session is idle" [ref=e79]: idle
+              - button "Rename session Greeting" [ref=e82] [cursor=pointer]: ✎
+              - button "Close pane Greeting" [ref=e83] [cursor=pointer]: ✕
+            - listitem [ref=e84]:
+              - button "pane-acve8zqp idle" [ref=e85] [cursor=pointer]:
+                - generic [ref=e86]: pane-acve8zqp
+                - generic "Devin session is idle" [ref=e87]: idle
+              - button "Rename session pane-acve8zqp" [ref=e90] [cursor=pointer]: ✎
+              - button "Close pane pane-acve8zqp" [ref=e91] [cursor=pointer]: ✕
+        - listitem [ref=e92]:
+          - generic [ref=e93]:
+            - button "▾" [ref=e94] [cursor=pointer]
+            - button "Test" [ref=e95] [cursor=pointer]
+            - button "Rename workspace Test" [ref=e97] [cursor=pointer]: ✎
+            - button "Close workspace Test" [ref=e98] [cursor=pointer]: ✕
+          - list [ref=e99]:
+            - listitem [ref=e100]:
+              - button "catkin-roquefort idle" [ref=e101] [cursor=pointer]:
+                - generic [ref=e102]: catkin-roquefort
+                - generic "Devin session is idle" [ref=e103]: idle
+              - button "Rename session pane-g0f5jbbl" [ref=e106] [cursor=pointer]: ✎
+              - button "Close pane pane-g0f5jbbl" [ref=e107] [cursor=pointer]: ✕
+    - main [ref=e22]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - strong [ref=e110]: heyDebby
+          - generic "/Users/ashoknaik/claude-experiments/dubai-builder-hub-3/heyDebby" [ref=e111]
+        - group "View" [ref=e112]:
+          - button "⊞ Grid" [pressed] [ref=e113] [cursor=pointer]
+          - button "▯ Tabs" [ref=e114] [cursor=pointer]
+        - generic [ref=e115]:
+          - generic [ref=e116]: Terminals
+          - combobox "Terminals" [ref=e117]:
+            - option "1"
+            - option "2" [selected]
+            - option "3"
+            - option "4"
+            - option "5"
+            - option "6"
+        - button "↺ Reset" [ref=e118] [cursor=pointer]
+        - button "Sessions…" [ref=e119] [cursor=pointer]
+      - generic [ref=e121]:
+        - generic [ref=e122]:
+          - generic [ref=e124]:
+            - generic [ref=e125]:
+              - generic [ref=e126]: Greeting
+              - generic "Devin session is idle" [ref=e127]: idle
+              - button "Trace this session" [ref=e130] [cursor=pointer]: ⟐
+              - button "Maximize pane" [ref=e131] [cursor=pointer]: ⤢
+              - button "Close pane" [ref=e132] [cursor=pointer]: ✕
+            - generic [ref=e136]:
+              - generic:
+                - textbox "Terminal input"
+          - separator [ref=e171]
+        - generic [ref=e174]:
+          - generic [ref=e175]:
+            - generic [ref=e176]: devin
+            - generic "Devin session is idle" [ref=e177]: idle
+            - button "Maximize pane" [ref=e180] [cursor=pointer]: ⤢
+            - button "Close pane" [ref=e181] [cursor=pointer]: ✕
+          - generic [ref=e185]:
+            - generic:
+              - textbox "Terminal input"
+  - contentinfo [ref=e32]:
+    - generic [ref=e33]: Local-first. Your agents run on this machine — nothing is uploaded.
+    - generic [ref=e34]: v0.1.0
+  - generic [ref=e221]:
+    - banner [ref=e222]:
+      - heading "New workspace" [level=2] [ref=e223]
+      - button "Close" [ref=e224] [cursor=pointer]: ✕
+    - generic [ref=e225]:
+      - generic [ref=e226]: Name
+      - textbox "Name" [active] [ref=e227]:
+        - /placeholder: api-fix
+    - generic [ref=e228]:
+      - generic [ref=e229]: Working directory
+      - textbox "Working directory An absolute path, or ~/…. New panes in this workspace start here — Devin scopes its sessions by directory, and works best in a project rather than your home folder." [ref=e230]:
+        - /placeholder: /Users/you/projects/my-repo
+        - text: /Users/ashoknaik/claude-experiments/dubai-builder-hub-3/heyDebby
+      - generic [ref=e231]:
+        - text: An absolute path, or
+        - code [ref=e232]: ~/…
+        - text: . New panes in this workspace start here — Devin scopes its sessions by directory, and works best in a project rather than your home folder.
+    - generic [ref=e233]:
+      - generic [ref=e234]: context.dev API key
+      - textbox "context.dev API key Every pane here gets the context.dev MCP server. Leave blank to use the key from the server’s .env, or paste one to bill this workspace separately." [ref=e235]:
+        - /placeholder: optional — using the server default
+      - generic [ref=e236]: Every pane here gets the context.dev MCP server. Leave blank to use the key from the server’s .env, or paste one to bill this workspace separately.
+    - contentinfo [ref=e237]:
+      - button "Cancel" [ref=e238] [cursor=pointer]
+      - button "Create workspace" [disabled] [ref=e239]

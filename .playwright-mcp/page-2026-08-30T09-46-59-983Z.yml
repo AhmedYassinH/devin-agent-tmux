@@ -1,0 +1,27 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Devin Agent Tmux
+    - generic [ref=e9]: Run many agents. In parallel.
+    - generic "Agents blocked on your input" [ref=e10]: none waiting
+    - button "Guide" [ref=e11] [cursor=pointer]
+    - button "New workspace" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - navigation [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]: Workspaces
+          - generic [ref=e19]: "0"
+        - button "Collapse sidebar" [ref=e20] [cursor=pointer]: «
+      - button "New workspace" [ref=e21] [cursor=pointer]
+      - list
+    - main [ref=e22]:
+      - generic [ref=e23]:
+        - generic [ref=e24]: No workspace
+        - heading "Agent workspaces" [level=1] [ref=e27]
+        - paragraph [ref=e28]: A workspace is a named group of Devin sessions with its own layout and a default working directory. Point one at a project, pick how many terminals you want, and run several agents side by side — each with its own status, context budget and transcript.
+        - generic [ref=e29]:
+          - button "Create a workspace" [ref=e30] [cursor=pointer]
+          - button "Resume a past session" [ref=e31] [cursor=pointer]
+  - contentinfo [ref=e32]:
+    - generic [ref=e33]: Local-first. Your agents run on this machine — nothing is uploaded.
+    - generic [ref=e34]: v0.1.0

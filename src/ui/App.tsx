@@ -39,7 +39,6 @@ import { TracePanel } from './TracePanel.js';
 import { NameDialog, type NameDialogSpec } from './NameDialog.js';
 import { Guide } from './Guide.js';
 import { ContextBadge, StatusBadge } from './StatusBadge.js';
-import { tintForIndex } from './theme.js';
 
 const backend = new Backend();
 
@@ -58,7 +57,9 @@ export function App() {
    */
   const [activeTab, setActiveTab] = useState<string | null>(null);
   // Real paths from the server: the browser cannot resolve `~` or know a cwd.
-  const [env, setEnv] = useState<{ home: string; cwd: string } | null>(null);
+  const [env, setEnv] = useState<{ home: string; cwd: string; hasDefaultContextKey: boolean } | null>(
+    null,
+  );
   const [dialog, setDialog] = useState<NameDialogSpec | null>(null);
   /**
    * Show the guide unprompted on a first visit, then never again.
@@ -93,7 +94,7 @@ export function App() {
     return backend.subscribe((msg) => {
       switch (msg.t) {
         case 'env':
-          setEnv({ home: msg.home, cwd: msg.cwd });
+          setEnv({ home: msg.home, cwd: msg.cwd, hasDefaultContextKey: msg.hasDefaultContextKey });
           break;
         case 'state':
           applyingRemote.current = true;
@@ -135,7 +136,7 @@ export function App() {
   const active = state.activeWorkspaceId ? state.workspaces[state.activeWorkspaceId] : undefined;
 
   const spawn = useCallback(
-    (session: SessionConfig, opts: { shellOnly?: boolean }) => {
+    (session: SessionConfig, opts: { shellOnly?: boolean; contextApiKey?: string }) => {
       backend.send({
         t: 'pane:spawn',
         paneId: session.id,
@@ -147,6 +148,9 @@ export function App() {
         prompt: session.prompt,
         resumeSessionId: session.resumeSessionId,
         shellOnly: opts.shellOnly,
+        // The owning workspace's context.dev key. Undefined is meaningful: the
+        // server falls back to its own default rather than skipping the server.
+        contextApiKey: opts.contextApiKey,
       });
       setStatuses((s) => ({ ...s, [session.id]: 'running' }));
     },
@@ -166,7 +170,7 @@ export function App() {
         createdAt: Date.now(),
       };
       setState((prev) => addSession(prev, active.id, session));
-      spawn(session, { shellOnly: req.shellOnly });
+      spawn(session, { shellOnly: req.shellOnly, contextApiKey: active.contextApiKey });
       setActiveTab(session.id);
     },
     [active, spawn],
@@ -218,7 +222,11 @@ export function App() {
   // Default to a directory that actually exists: the server's cwd, else home.
   // `~` alone is shell syntax, and a process spawned into it dies before it runs.
   const newWorkspace = useCallback(() => {
-    setDialog({ mode: 'create-workspace', defaultCwd: active?.cwd ?? env?.cwd ?? env?.home ?? '' });
+    setDialog({
+      mode: 'create-workspace',
+      defaultCwd: active?.cwd ?? env?.cwd ?? env?.home ?? '',
+      hasDefaultContextKey: env?.hasDefaultContextKey ?? false,
+    });
   }, [active, env]);
 
   /**
@@ -233,10 +241,10 @@ export function App() {
   }, [active, activeTab]);
 
   /**
-   * Agents blocked on a human, across every workspace. This drives the red
-   * banner callout: in 1996 the phone number sat top-right because calling was
-   * the action the page existed to provoke. Here, the thing demanding action is
-   * an agent waiting on you.
+   * Agents blocked on a human, across every workspace. This drives the tag in
+   * the nav bar — the one thing on screen that is genuinely waiting on the
+   * user, so it earns a warning colour when it is non-zero and reads as plain
+   * neutral text when it is not.
    */
   const waitingCount = useMemo(
     () => Object.values(statuses).filter((s) => s === 'waiting').length,
@@ -256,18 +264,17 @@ export function App() {
     const session = active.sessions[sessionId];
     if (!session) return null;
 
-    // Each pane owns a catalog tint the way each Dell product line did. Keyed on
-    // position so neighbouring panes always differ.
-    const tint = tintForIndex(active.sessionOrder.indexOf(sessionId));
     const status = statuses[sessionId] ?? 'idle';
 
+    // Panes are told apart by the surface system, not by a per-pane colour: the
+    // brass left edge marks the one you are typing into (CSS :focus-within),
+    // and a blocked agent tints its own header. Both are states worth seeing;
+    // "third pane you opened" was not.
     return (
       <div
-        className={`pane tint-${tint} ${maximized === sessionId ? 'maximized' : ''}`}
+        className={`pane ${status === 'waiting' ? 'needs-you' : ''} ${maximized === sessionId ? 'maximized' : ''}`}
         key={sessionId}
       >
-        {/* new-burst-sticker: taped on at an angle when the agent is blocked */}
-        {status === 'waiting' && <span className="burst">Needs you!</span>}
         <header className="pane-head">
           <span className="pane-name">{session.name || session.devinSessionId || 'devin'}</span>
           <StatusBadge status={status} />
@@ -275,17 +282,28 @@ export function App() {
           <span className="spacer" />
           {session.devinSessionId && (
             <button
-              className="ghost"
+              className="ghost icon"
+              aria-label="Trace this session"
               title="Trace this session (available once the pane is closed — Devin allows one holder)"
               onClick={() => setTrace({ sessionId: session.devinSessionId!, cwd: session.cwd })}
             >
               ⟐
             </button>
           )}
-          <button className="ghost" onClick={() => setMaximized((m) => (m === sessionId ? null : sessionId))}>
+          <button
+            className="ghost icon"
+            aria-label={maximized === sessionId ? 'Restore pane' : 'Maximize pane'}
+            title={maximized === sessionId ? 'Restore' : 'Maximize'}
+            onClick={() => setMaximized((m) => (m === sessionId ? null : sessionId))}
+          >
             {maximized === sessionId ? '⤡' : '⤢'}
           </button>
-          <button className="ghost" onClick={() => closeSession(active.id, sessionId)}>
+          <button
+            className="ghost icon"
+            aria-label="Close pane"
+            title="Close pane"
+            onClick={() => closeSession(active.id, sessionId)}
+          >
             ✕
           </button>
         </header>
@@ -296,23 +314,30 @@ export function App() {
 
   return (
     <div className="app">
-      {/* top-banner: black strip, Helvetica caps, red callout + yellow sticker */}
+      {/* The nav bar. The wordmark glyph is the only brass here; the waiting
+          count earns the second appearance only when it is non-zero. */}
       <header className="banner">
-        <span className="banner-brand">Devin&middot;Agent&middot;Tmux</span>
+        <span className="wordmark">
+          {/* Four panes on a grid — engraved, square caps, never filled. */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path strokeLinecap="square" strokeLinejoin="miter" d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z" />
+          </svg>
+          <span className="wordmark-name">Devin Agent Tmux</span>
+        </span>
         <span className="banner-tag">Run many agents. In parallel.</span>
         <span className="spacer" />
+        {/* Status is carried by the word, not only the colour. */}
         <span
-          className={waitingCount > 0 ? 'callout' : 'callout quiet'}
+          className={waitingCount > 0 ? 'tag tag-warning' : 'tag tag-neutral'}
           title="Agents blocked on your input"
         >
-          {waitingCount > 0 ? `${waitingCount} agent${waitingCount === 1 ? '' : 's'} waiting` : 'No agents waiting'}
+          {waitingCount > 0 ? `${waitingCount} waiting` : 'none waiting'}
         </span>
-        <button className="banner-link" onClick={() => setGuide(true)} title="How this works">
+        <button className="ghost" onClick={() => setGuide(true)} title="How this works">
           Guide
         </button>
-        {/* buy-a-dell-sticker slot: the page's primary entry action */}
-        <button className="sticker" onClick={newWorkspace}>
-          + New workspace
+        <button className="primary" onClick={newWorkspace}>
+          New workspace
         </button>
       </header>
 
@@ -357,25 +382,38 @@ export function App() {
       <main className="main">
         {!active ? (
           <div className="empty-state">
-            <h1>Agent Workspaces</h1>
-            {/* cta-block-red: one per page, maximum. The singular attention pole. */}
-            <div className="cta-red">
-              <p>
-                A workspace is a named group of Devin sessions with its own layout and a default
-                working directory. Point one at a project, pick how many terminals you want, and run
-                several agents side by side &mdash; each with its own status, context budget and
-                transcript.
-              </p>
-              <button onClick={newWorkspace}>Create a workspace</button>
-              <button onClick={() => setPicker(true)}>Resume a past session</button>
+            <div className="readout-rule">
+              <span className="rule-label">No workspace</span>
+              <i className="rule-line" />
+            </div>
+            <h1>Agent workspaces</h1>
+            <p>
+              A workspace is a named group of Devin sessions with its own layout and a default
+              working directory. Point one at a project, pick how many terminals you want, and run
+              several agents side by side &mdash; each with its own status, context budget and
+              transcript.
+            </p>
+            {/* One primary action per region: only the first is brass. */}
+            <div className="empty-actions">
+              <button className="primary" onClick={newWorkspace}>
+                Create a workspace
+              </button>
+              <button className="secondary" onClick={() => setPicker(true)}>
+                Resume a past session
+              </button>
             </div>
           </div>
         ) : (
           <>
             <header className="toolbar">
-              <strong className="ws-title" title={active.cwd}>
-                {active.name}
-              </strong>
+              <span className="ws-heading">
+                <strong className="ws-title">{active.name}</strong>
+                {/* The path is a measured thing: mono, and truncated from the
+                    root so the leaf stays readable. */}
+                <span className="ws-cwd" title={active.cwd}>
+                  {active.cwd}
+                </span>
+              </span>
 
               <div className="segmented" role="group" aria-label="View">
                 <button
@@ -463,15 +501,11 @@ export function App() {
       </main>
       </div>
 
-      {/* footer-band: classic-blue anchors and small print, as every 1996 page had */}
       <footer className="footer-band">
-        <span>
-          Local-first. Your agents run on this machine &mdash; nothing is uploaded.
-        </span>
+        <span>Local-first. Your agents run on this machine &mdash; nothing is uploaded.</span>
         <span className="spacer" />
-        <span className="muted small">
-          Best viewed with browser versions 3.0 and higher.
-        </span>
+        {/* A version is a measurement: `data` type, tabular numerals. */}
+        <span className="data">v0.1.0</span>
       </footer>
 
       {trace && (
@@ -489,11 +523,11 @@ export function App() {
         <NameDialog
           spec={dialog}
           onCancel={() => setDialog(null)}
-          onSubmit={(name, cwd) => {
+          onSubmit={(name, cwd, contextApiKey) => {
             setState((p) => {
               switch (dialog.mode) {
                 case 'create-workspace':
-                  return createWorkspace(p, name, cwd);
+                  return createWorkspace(p, name, cwd, undefined, contextApiKey);
                 case 'rename-workspace':
                   return renameWorkspace(p, dialog.id, name);
                 case 'rename-session':

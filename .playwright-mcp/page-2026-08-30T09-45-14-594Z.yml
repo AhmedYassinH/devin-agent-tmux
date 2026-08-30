@@ -1,0 +1,202 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Devin Agent Tmux
+    - generic [ref=e9]: Run many agents. In parallel.
+    - generic "Agents blocked on your input" [ref=e10]: none waiting
+    - button "Guide" [ref=e11] [cursor=pointer]
+    - button "New workspace" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - navigation [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - generic [ref=e17]: Workspaces
+          - generic [ref=e19]: "3"
+        - button "Collapse sidebar" [ref=e20] [cursor=pointer]: «
+      - button "New workspace" [ref=e21] [cursor=pointer]
+      - list [ref=e22]:
+        - listitem [ref=e23]:
+          - generic [ref=e24]:
+            - button "▾" [ref=e25] [cursor=pointer]
+            - button "NewPLAce" [ref=e26] [cursor=pointer]
+            - button "Rename workspace NewPLAce" [ref=e28] [cursor=pointer]: ✎
+            - button "Close workspace NewPLAce" [ref=e29] [cursor=pointer]: ✕
+          - list [ref=e30]:
+            - listitem [ref=e31]:
+              - button "skinny-belief idle" [ref=e32] [cursor=pointer]:
+                - generic [ref=e33]: skinny-belief
+                - generic "Devin session is idle" [ref=e34]: idle
+              - button "Rename session pane-hfnf5n4w" [ref=e37] [cursor=pointer]: ✎
+              - button "Close pane pane-hfnf5n4w" [ref=e38] [cursor=pointer]: ✕
+            - listitem [ref=e39]:
+              - button "tricky-gray idle" [ref=e40] [cursor=pointer]:
+                - generic [ref=e41]: tricky-gray
+                - generic "Devin session is idle" [ref=e42]: idle
+              - button "Rename session pane-sjxy510k" [ref=e45] [cursor=pointer]: ✎
+              - button "Close pane pane-sjxy510k" [ref=e46] [cursor=pointer]: ✕
+            - listitem [ref=e47]:
+              - button "infrequent-scene idle" [ref=e48] [cursor=pointer]:
+                - generic [ref=e49]: infrequent-scene
+                - generic "Devin session is idle" [ref=e50]: idle
+              - button "Rename session pane-srjdlakt" [ref=e53] [cursor=pointer]: ✎
+              - button "Close pane pane-srjdlakt" [ref=e54] [cursor=pointer]: ✕
+        - listitem [ref=e55]:
+          - generic [ref=e56]:
+            - button "▾" [ref=e57] [cursor=pointer]
+            - button "heyDebby" [ref=e58] [cursor=pointer]
+            - button "Rename workspace heyDebby" [ref=e60] [cursor=pointer]: ✎
+            - button "Close workspace heyDebby" [ref=e61] [cursor=pointer]: ✕
+          - list [ref=e62]:
+            - listitem [ref=e63]:
+              - button "Greeting idle" [ref=e64] [cursor=pointer]:
+                - generic [ref=e65]: Greeting
+                - generic "Devin session is idle" [ref=e66]: idle
+              - button "Rename session Greeting" [ref=e69] [cursor=pointer]: ✎
+              - button "Close pane Greeting" [ref=e70] [cursor=pointer]: ✕
+            - listitem [ref=e71]:
+              - button "pane-acve8zqp idle" [ref=e72] [cursor=pointer]:
+                - generic [ref=e73]: pane-acve8zqp
+                - generic "Devin session is idle" [ref=e74]: idle
+              - button "Rename session pane-acve8zqp" [ref=e77] [cursor=pointer]: ✎
+              - button "Close pane pane-acve8zqp" [ref=e78] [cursor=pointer]: ✕
+        - listitem [ref=e79]:
+          - generic [ref=e80]:
+            - button "▾" [ref=e81] [cursor=pointer]
+            - button "Test" [ref=e82] [cursor=pointer]
+            - button "Rename workspace Test" [ref=e84] [cursor=pointer]: ✎
+            - button "Close workspace Test" [ref=e85] [cursor=pointer]: ✕
+          - list [ref=e86]:
+            - listitem [ref=e87]:
+              - button "catkin-roquefort idle" [ref=e88] [cursor=pointer]:
+                - generic [ref=e89]: catkin-roquefort
+                - generic "Devin session is idle" [ref=e90]: idle
+              - button "Rename session pane-g0f5jbbl" [ref=e93] [cursor=pointer]: ✎
+              - button "Close pane pane-g0f5jbbl" [ref=e94] [cursor=pointer]: ✕
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e97]:
+          - strong [ref=e98]: Test
+          - generic "/Users/ashoknaik/claude-experiments/dubai-builder-hub-3/heyDebby" [ref=e99]
+        - group "View" [ref=e100]:
+          - button "⊞ Grid" [pressed] [ref=e101] [cursor=pointer]
+          - button "▯ Tabs" [ref=e102] [cursor=pointer]
+        - generic [ref=e103]:
+          - generic [ref=e104]: Terminals
+          - combobox "Terminals" [ref=e105]:
+            - option "1"
+            - option "2" [selected]
+            - option "3"
+            - option "4"
+            - option "5"
+            - option "6"
+        - button "↺ Reset" [ref=e106] [cursor=pointer]
+        - button "Sessions…" [ref=e107] [cursor=pointer]
+      - generic [ref=e109]:
+        - generic [ref=e110]:
+          - generic [ref=e112]:
+            - generic [ref=e113]:
+              - generic [ref=e114]: catkin-roquefort
+              - generic "Devin session is idle" [ref=e115]: idle
+              - button "Trace this session" [ref=e118] [cursor=pointer]: ⟐
+              - button "Maximize pane" [ref=e119] [cursor=pointer]: ⤢
+              - button "Close pane" [ref=e120] [cursor=pointer]: ✕
+            - generic [ref=e124]:
+              - generic:
+                - textbox "Terminal input"
+          - separator [ref=e152]
+        - generic [ref=e156]:
+          - generic [ref=e157]:
+            - generic [ref=e158]:
+              - generic [ref=e159]: Empty slot
+              - generic [ref=e161]: devin
+            - heading "Start an agent" [level=2] [ref=e162]
+            - paragraph [ref=e163]:
+              - text: The pane becomes a real
+              - code [ref=e164]: devin
+              - text: terminal. Everything else is set inside it.
+          - generic [ref=e165]:
+            - generic [ref=e166]:
+              - generic [ref=e167]: Session name
+              - textbox "Session name" [ref=e168]:
+                - /placeholder: optional — a label for the sidebar
+            - generic [ref=e169]:
+              - generic [ref=e170]: Working directory
+              - textbox "Working directory" [ref=e171]: /Users/ashoknaik/claude-experiments/dubai-builder-hub-3/heyDebby
+          - generic [ref=e172]:
+            - button "Run Devin" [ref=e173] [cursor=pointer]
+            - button "Resume a session…" [ref=e174] [cursor=pointer]
+            - button "Shell" [ref=e175] [cursor=pointer]
+          - paragraph [ref=e176]:
+            - text: Starts with edits auto-approved. Inside the pane,
+            - code [ref=e177]: Shift+Tab
+            - text: cycles the permission mode and
+            - code [ref=e178]: /model
+            - text: switches model.
+  - contentinfo [ref=e179]:
+    - generic [ref=e180]: Local-first. Your agents run on this machine — nothing is uploaded.
+    - generic [ref=e181]: v0.1.0
+  - dialog "Guide" [ref=e183]:
+    - banner [ref=e184]:
+      - heading "The Guide" [level=2] [ref=e185]
+      - button "Close guide" [ref=e186] [cursor=pointer]: ✕
+    - paragraph [ref=e187]:
+      - text: Run many Devin CLI agents in parallel, in your browser. Each pane is the real
+      - code [ref=e188]: devin
+      - text: terminal — this app arranges them, watches them, and remembers them.
+    - generic [ref=e189]:
+      - generic [ref=e190]:
+        - generic [ref=e191]:
+          - generic [ref=e192]: Workspaces
+          - generic [ref=e194]: "01"
+        - paragraph [ref=e195]: A workspace is a named group of Devin sessions with its own layout and a default working directory. Add one with + New workspace, rename with ✎ (or double-click), and remove with ✕. Point it at a project directory — Devin scopes its sessions by directory and warns when run from your home folder.
+      - generic [ref=e196]:
+        - generic [ref=e197]:
+          - generic [ref=e198]: Terminals & layout
+          - generic [ref=e200]: "02"
+        - paragraph [ref=e201]: Pick 1–6 from the Terminals dropdown. Drag the dividers to resize; the terminals reflow. Reset re-evens the splits without touching the running processes. Closing a pane with ✕ shrinks the grid — the slot goes away rather than leaving an empty launcher behind.
+      - generic [ref=e202]:
+        - generic [ref=e203]:
+          - generic [ref=e204]: Run an agent
+          - generic [ref=e206]: "03"
+        - paragraph [ref=e207]:
+          - text: In an empty pane, optionally name it, confirm the working directory, and hit Run Devin (or Shell for a plain terminal). Each pane is the real
+          - code [ref=e208]: devin
+          - text: "TUI, so everything works as it does in your terminal: slash commands,"
+          - code [ref=e209]: /model
+          - text: to switch model,
+          - code [ref=e210]: Shift+Tab
+          - text: to cycle the permission mode. Panes start with edits auto-approved.
+      - generic [ref=e211]:
+        - generic [ref=e212]:
+          - generic [ref=e213]: Status & attention
+          - generic [ref=e215]: "04"
+        - paragraph [ref=e216]: "Every pane and sidebar row carries a live status — idle, running, waiting, exited — driven by Devin's own lifecycle hooks, not by guessing at terminal output. When an agent needs you its pane header lights amber, its workspace gets a marker, and the count appears at the top right. That's the point of running six at once: you work by exception instead of watching panes."
+      - generic [ref=e217]:
+        - generic [ref=e218]:
+          - generic [ref=e219]: Resume a past session
+          - generic [ref=e221]: "05"
+        - paragraph [ref=e222]:
+          - text: Sessions lists every Devin conversation on this machine. Resume relaunches one with
+          - code [ref=e223]: devin -r
+          - text: in its own new workspace, at the directory it originally ran in — that flag only works from there. Sessions marked locked are open in a running process; Devin allows one holder at a time.
+      - generic [ref=e224]:
+        - generic [ref=e225]:
+          - generic [ref=e226]: Trace a session
+          - generic [ref=e228]: "06"
+        - paragraph [ref=e229]: "Trace replays a conversation turn by turn: prompts, replies, thinking, and every tool call paired with its result, duration and file diff. It reads Devin's own record over ACP, so nothing is reconstructed or copied. Live panes can't be traced while they run — the same one-holder lock — so trace a session once its pane is closed."
+      - generic [ref=e230]:
+        - generic [ref=e231]:
+          - generic [ref=e232]: Context health
+          - generic [ref=e234]: "07"
+        - paragraph [ref=e235]: "The % readout estimates how full a pane's context window is: green, amber past 50%, red past 70%, where quality starts degrading well before the hard limit. It's an estimate — Devin reports cumulative token totals, so the figure is derived from per-turn deltas. Hover it for the exact counts and the model's real window."
+      - generic [ref=e236]:
+        - generic [ref=e237]:
+          - generic [ref=e238]: Where your state lives
+          - generic [ref=e240]: "08"
+        - paragraph [ref=e241]:
+          - text: Workspaces, layouts and sessions are saved to
+          - code [ref=e242]: ~/.devin-agent-tmux/
+          - text: as one readable JSON file per entity —
+          - code [ref=e243]: cat
+          - text: "it, diff it, back it up. Everything runs on this machine: your agents, your code, your Devin credentials. Nothing is uploaded unless you configure the optional Convex mirror."
+    - contentinfo [ref=e244]:
+      - button "Start building" [ref=e245] [cursor=pointer]

@@ -42,7 +42,18 @@ export function uniqueWorkspaceName(state: AppState, base: string): string {
   return `${base} ${Date.now()}`;
 }
 
-export function createWorkspace(state: AppState, name: string, cwd: string, template: TemplateName = '1x2'): AppState {
+export function createWorkspace(
+  state: AppState,
+  name: string,
+  cwd: string,
+  template: TemplateName = '1x2',
+  /**
+   * context.dev key for this workspace's panes. Blank is normalised away here
+   * rather than at every call site: an empty string would otherwise reach the
+   * spawn as a present-but-useless key and shadow the .env default.
+   */
+  contextApiKey?: string,
+): AppState {
   const id = makeId('ws');
   const ws: Workspace = {
     id,
@@ -52,6 +63,7 @@ export function createWorkspace(state: AppState, name: string, cwd: string, temp
     layout: templateLayout(template),
     sessionOrder: [],
     sessions: {},
+    contextApiKey: contextApiKey?.trim() || undefined,
     updatedAt: Date.now(),
   };
   return {
@@ -85,6 +97,17 @@ function patch(state: AppState, id: string, fn: (ws: Workspace) => Workspace): A
 
 export function renameWorkspace(state: AppState, id: string, name: string): AppState {
   return patch(state, id, (ws) => ({ ...ws, name }));
+}
+
+/**
+ * Change a workspace's context.dev key.
+ *
+ * Takes effect on the NEXT spawn, not on running panes: a pane's MCP config is
+ * read by `devin` when the process starts, so a live session keeps the key it
+ * launched with. Relaunch the pane to move it onto a new key.
+ */
+export function setWorkspaceContextApiKey(state: AppState, id: string, key: string): AppState {
+  return patch(state, id, (ws) => ({ ...ws, contextApiKey: key.trim() || undefined }));
 }
 
 export function setWorkspaceView(state: AppState, id: string, view: WorkspaceView): AppState {

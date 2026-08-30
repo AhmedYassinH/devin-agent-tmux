@@ -36,7 +36,12 @@ export function Sidebar({
   if (collapsed) {
     return (
       <nav className="sidebar rail">
-        <button className="ghost" onClick={onToggleCollapsed} title="Expand sidebar">
+        <button
+          className="ghost icon"
+          onClick={onToggleCollapsed}
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
           »
         </button>
         {state.workspaceOrder.map((id) => {
@@ -62,14 +67,25 @@ export function Sidebar({
   return (
     <nav className="sidebar">
       <header>
-        <span className="brand">devin-agent-tmux</span>
-        <button className="ghost" onClick={onToggleCollapsed} title="Collapse sidebar">
+        {/* The rail's group header is the signature readout rule, carrying the
+            workspace count as its right-flush value. */}
+        <div className="readout-rule">
+          <span className="rule-label">Workspaces</span>
+          <i className="rule-line" />
+          <span className="rule-value">{state.workspaceOrder.length}</span>
+        </div>
+        <button
+          className="ghost icon"
+          onClick={onToggleCollapsed}
+          title="Collapse sidebar"
+          aria-label="Collapse sidebar"
+        >
           «
         </button>
       </header>
 
-      <button className="new-ws" onClick={onNewWorkspace}>
-        + new workspace
+      <button className="new-ws secondary" onClick={onNewWorkspace}>
+        New workspace
       </button>
 
       <ul className="ws-list">
@@ -91,18 +107,23 @@ export function Sidebar({
                   onDoubleClick={() => onRequestRename(id)}
                   title={ws.cwd}
                 >
-                  {ws.name}
-                  {attention && <i className="attention" />}
+                  <span className="name">{ws.name}</span>
+                  {attention && <i className="attention" title="An agent here is waiting on you" />}
                 </button>
                 <button
-                  className="ghost"
+                  className="ghost icon"
                   onClick={() => onRequestRename(id)}
                   title="Rename workspace"
                   aria-label={`Rename workspace ${ws.name}`}
                 >
                   ✎
                 </button>
-                <button className="ghost" onClick={() => onCloseWorkspace(id)} title="Close workspace">
+                <button
+                  className="ghost icon"
+                  onClick={() => onCloseWorkspace(id)}
+                  title="Close workspace"
+                  aria-label={`Close workspace ${ws.name}`}
+                >
                   ✕
                 </button>
               </div>
@@ -123,20 +144,25 @@ export function Sidebar({
                           <StatusBadge status={statuses[sid] ?? 'idle'} />
                         </button>
                         <button
-                          className="ghost"
+                          className="ghost icon"
                           onClick={() => onRequestRenameSession(id, sid)}
                           title="Rename session"
                           aria-label={`Rename session ${session.name || sid}`}
                         >
                           ✎
                         </button>
-                        <button className="ghost" onClick={() => onCloseSession(id, sid)} title="Close pane">
+                        <button
+                          className="ghost icon"
+                          onClick={() => onCloseSession(id, sid)}
+                          title="Close pane"
+                          aria-label={`Close pane ${session.name || sid}`}
+                        >
                           ✕
                         </button>
                       </li>
                     );
                   })}
-                  {ws.sessionOrder.length === 0 && <li className="muted small empty">no panes yet</li>}
+                  {ws.sessionOrder.length === 0 && <li className="empty">no panes yet</li>}
                 </ul>
               )}
             </li>

@@ -18,6 +18,8 @@ import { buildDevinLaunch, shellLaunchArgs } from '../core/launch.js';
 import { composeSessionConfig, devinStatusHooks, hookScriptSource } from '../core/hooks.js';
 import { OscScanner, type OscSignal } from '../core/osc.js';
 import type { DevinPermissionMode } from '../core/models.js';
+import { resolveContextApiKey } from '../core/mcp.js';
+import { buildPaneConfigDir, readUserMcpConfig, userDevinDir } from './devin-config-dir.js';
 import type { FileStore } from './store.js';
 import { resolveCwd } from './paths.js';
 
@@ -34,6 +36,8 @@ export interface SpawnOptions {
   resumeSessionId?: string;
   /** Launch a plain shell instead of devin — the escape hatch pane. */
   shellOnly?: boolean;
+  /** The owning workspace's context.dev key; falls back to CONTEXT_DEV_API_KEY. */
+  contextApiKey?: string;
 }
 
 export interface PaneHandle {
@@ -48,7 +52,7 @@ type OnExit = (paneId: string, code: number) => void;
 
 /** Where devin keeps the user's own config — the base we merge hooks into. */
 function userConfigPath(): string {
-  return process.env.DEVIN_CONFIG || join(homedir(), '.config', 'devin', 'config.json');
+  return process.env.DEVIN_CONFIG || join(userDevinDir(), 'config.json');
 }
 
 export class PaneSupervisor {
@@ -61,15 +65,20 @@ export class PaneSupervisor {
   ) {}
 
   /**
-   * Write the per-pane devin config.
+   * Build the per-pane devin config directory.
    *
-   * `--config` REPLACES the user config rather than layering onto it, so this
-   * must start from the user's own file or the pane launches without their
-   * org_id, model default and permission allowlist. A missing or corrupt user
-   * config degrades to hooks-only, which fails visibly at the Devin prompt
-   * instead of silently.
+   * Two things have to be per-pane, and they need two different mechanisms:
+   *
+   *   hooks -> `--config`, which REPLACES the user config rather than layering
+   *     onto it. So the merge must start from the user's own file or the pane
+   *     launches without their org_id, model default and permission allowlist.
+   *   MCP   -> `XDG_CONFIG_HOME`, because `--config` does not carry MCP servers
+   *     at all. See devin-config-dir.ts and core/mcp.ts.
+   *
+   * A missing or corrupt user config degrades to hooks-only, which fails
+   * visibly at the Devin prompt instead of silently.
    */
-  private writePaneConfig(paneId: string): string {
+  private writePaneConfig(paneId: string, contextApiKey?: string) {
     const scriptPath = this.store.ensureHookScript(hookScriptSource());
     let userConfig: unknown = null;
     try {
@@ -77,13 +86,18 @@ export class PaneSupervisor {
     } catch {
       console.warn('[panes] no readable devin user config; launching with hooks only');
     }
-    const merged = composeSessionConfig(userConfig, devinStatusHooks(scriptPath));
+    const sessionConfig = composeSessionConfig(userConfig, devinStatusHooks(scriptPath));
 
     const dir = this.store.paneDir(paneId);
     mkdirSync(dir, { recursive: true });
-    const path = join(dir, 'config.json');
-    writeFileSync(path, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
-    return path;
+
+    return buildPaneConfigDir(dir, {
+      sessionConfig,
+      // The workspace's key, or the .env default that makes context.dev a
+      // default rather than something each workspace opts into.
+      contextApiKey: resolveContextApiKey(contextApiKey, process.env.CONTEXT_DEV_API_KEY),
+      userMcpConfig: readUserMcpConfig(),
+    });
   }
 
   /**
@@ -111,12 +125,19 @@ export class PaneSupervisor {
 
     let command: string | undefined;
     let exportPath: string | undefined;
+    let xdgHome: string | undefined;
 
     if (!opts.shellOnly) {
-      const configPath = this.writePaneConfig(opts.paneId);
+      // Every session starts with context.dev, keyed by its workspace. This
+      // cannot ride along in the --config file: devin reads MCP servers from
+      // dedicated mcp_config.json files and ignores an mcpServers key in the
+      // config it is handed. See devin-config-dir.ts.
+      const paneConfig = this.writePaneConfig(opts.paneId, opts.contextApiKey);
+      xdgHome = paneConfig.xdgHome;
+
       exportPath = join(this.store.paneDir(opts.paneId), 'export.json');
       command = buildDevinLaunch({
-        configPath,
+        configPath: paneConfig.configPath,
         exportPath,
         model: opts.model,
         permissionMode: opts.permissionMode,
@@ -131,7 +152,16 @@ export class PaneSupervisor {
       cols: opts.cols,
       rows: opts.rows,
       cwd,
-      env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        // Points devin at the pane's own config directory, which is a shadow of
+        // ~/.config with devin/mcp_config.json generated for this workspace's
+        // key. Set for the pane rather than the server so two workspaces can run
+        // side by side on different keys. Credentials live under XDG_DATA_HOME
+        // and are untouched, so the session stays authenticated — verified.
+        ...(xdgHome ? { XDG_CONFIG_HOME: xdgHome } : {}),
+      } as Record<string, string>,
     });
 
     const scanner = new OscScanner();

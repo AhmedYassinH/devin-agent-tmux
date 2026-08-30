@@ -11,12 +11,22 @@ import { homedir } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { buildTrace } from '../core/trace.js';
 import { applySignal } from '../core/status.js';
+import { loadEnvFile } from './env.js';
 import { FileStore } from './store.js';
 import { PaneSupervisor } from './panes.js';
 import { HealthWatcher } from './health.js';
 import { ConvexMirror } from './convex-mirror.js';
-import { listSessions, loadSession } from './acp-client.js';
+import { AcpRequestError, listSessions, loadSession } from './acp-client.js';
 import type { ClientMessage, ServerMessage } from './protocol.js';
+
+// Before anything reads process.env: the server runs under tsx and gets none of
+// Vite's dotenv handling, so without this CONTEXT_DEV_API_KEY is undefined in
+// the one process that needs it. It is the fallback for every workspace that
+// has no context.dev key of its own — see core/mcp.ts.
+loadEnvFile();
+if (!process.env.CONTEXT_DEV_API_KEY?.trim()) {
+  console.warn('[mcp] no CONTEXT_DEV_API_KEY set — panes get context.dev only from a workspace key');
+}
 
 const PORT = Number(process.env.PORT || 5177);
 
@@ -78,6 +88,7 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
         permissionMode: msg.permissionMode,
         prompt: msg.prompt,
         resumeSessionId: msg.resumeSessionId,
+        contextApiKey: msg.contextApiKey,
         shellOnly: msg.shellOnly,
       });
       // spawn() returns null when the directory was unusable; it has already
@@ -115,7 +126,14 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
         const trace = buildTrace(msg.sessionId, updates);
         ws.send(JSON.stringify({ t: 'trace:result', reqId: msg.reqId, trace } satisfies ServerMessage));
       } catch (err) {
-        ws.send(JSON.stringify({ t: 'trace:result', reqId: msg.reqId, error: (err as Error).message } satisfies ServerMessage));
+        ws.send(
+          JSON.stringify({
+            t: 'trace:result',
+            reqId: msg.reqId,
+            error: (err as Error).message,
+            errorKind: err instanceof AcpRequestError ? err.kind : 'unknown',
+          } satisfies ServerMessage),
+        );
       }
       break;
     }
@@ -135,7 +153,15 @@ const wss = new WebSocketServer({ server: http, path: '/pty' });
 
 wss.on('connection', (ws) => {
   clients.add(ws);
-  ws.send(JSON.stringify({ t: 'env', home: homedir(), cwd: process.cwd() } satisfies ServerMessage));
+  ws.send(
+    JSON.stringify({
+      t: 'env',
+      home: homedir(),
+      cwd: process.cwd(),
+      // Whether, not what: the key stays on this side of the socket.
+      hasDefaultContextKey: Boolean(process.env.CONTEXT_DEV_API_KEY?.trim()),
+    } satisfies ServerMessage),
+  );
   ws.send(JSON.stringify({ t: 'state', state: store.load() } satisfies ServerMessage));
 
   ws.on('message', (raw) => {

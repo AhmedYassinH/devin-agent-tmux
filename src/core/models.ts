@@ -74,6 +74,16 @@ export interface Workspace {
   /** Pane order — drives the tab strip and the sidebar. */
   sessionOrder: string[];
   sessions: Record<string, SessionConfig>;
+  /**
+   * context.dev API key for the panes in this workspace.
+   *
+   * Collected when the workspace is created and used at spawn time to write the
+   * pane's `mcp_config.json`. Optional: when it is unset every pane falls back
+   * to CONTEXT_DEV_API_KEY from the server's `.env`, which is what makes
+   * context.dev a default rather than something each workspace must opt into.
+   * Per-workspace rather than global so two workspaces can bill to two accounts.
+   */
+  contextApiKey?: string;
   updatedAt: number;
 }
 

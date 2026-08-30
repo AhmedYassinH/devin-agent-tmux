@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 export type NameDialogSpec =
-  | { mode: 'create-workspace'; defaultCwd: string }
+  | { mode: 'create-workspace'; defaultCwd: string; hasDefaultContextKey: boolean }
   | { mode: 'rename-workspace'; id: string; name: string }
   | { mode: 'rename-session'; wsId: string; id: string; name: string };
 
@@ -31,12 +31,13 @@ export function NameDialog({
 }: {
   spec: NameDialogSpec;
   onCancel: () => void;
-  /** `cwd` is only meaningful for create-workspace; otherwise it is ''. */
-  onSubmit: (name: string, cwd: string) => void;
+  /** `cwd` and `contextApiKey` are only meaningful for create-workspace. */
+  onSubmit: (name: string, cwd: string, contextApiKey: string) => void;
 }) {
   const creating = spec.mode === 'create-workspace';
   const [name, setName] = useState(creating ? '' : spec.name);
   const [cwd, setCwd] = useState(creating ? spec.defaultCwd : '');
+  const [contextKey, setContextKey] = useState('');
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function NameDialog({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid) return;
-    onSubmit(trimmedName, trimmedCwd);
+    onSubmit(trimmedName, trimmedCwd, contextKey.trim());
   };
 
   return (
@@ -68,7 +69,13 @@ export function NameDialog({
       <form className="modal card" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <header>
           <h2>{TITLE[spec.mode]}</h2>
-          <button type="button" className="ghost" onClick={onCancel} aria-label="Close">
+          <button
+            type="button"
+            className="ghost icon"
+            onClick={onCancel}
+            aria-label="Close"
+            title="Close"
+          >
             ✕
           </button>
         </header>
@@ -82,7 +89,7 @@ export function NameDialog({
             placeholder={spec.mode === 'rename-session' ? 'auth-refactor' : 'api-fix'}
           />
           {spec.mode === 'rename-session' && (
-            <small className="muted">
+            <small>
               A label for you. Devin&rsquo;s own session id is unchanged, so resuming this
               conversation later still works.
             </small>
@@ -92,13 +99,15 @@ export function NameDialog({
         {creating && (
           <label className="field">
             <span>Working directory</span>
+            {/* A path is measured, not narrated: mono, per the type rules. */}
             <input
+              className="mono"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
               spellCheck={false}
               placeholder="/Users/you/projects/my-repo"
             />
-            <small className="muted">
+            <small>
               An absolute path, or <code>~/…</code>. New panes in this workspace start here — Devin
               scopes its sessions by directory, and works best in a project rather than your home
               folder.
@@ -106,8 +115,30 @@ export function NameDialog({
           </label>
         )}
 
+        {creating && (
+          <label className="field">
+            <span>context.dev API key</span>
+            {/* type=password so the key is not shoulder-read or captured in a
+                screenshot; a key is measured text, so it keeps the mono face. */}
+            <input
+              className="mono"
+              type="password"
+              value={contextKey}
+              onChange={(e) => setContextKey(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder={spec.hasDefaultContextKey ? 'optional — using the server default' : 'ctxt_secret_…'}
+            />
+            <small>
+              {spec.hasDefaultContextKey
+                ? 'Every pane here gets the context.dev MCP server. Leave blank to use the key from the server’s .env, or paste one to bill this workspace separately.'
+                : 'No default key is configured on the server. Paste one to give this workspace’s panes the context.dev MCP server — web search, scraping and document parsing.'}
+            </small>
+          </label>
+        )}
+
         <footer className="card-actions">
-          <button type="button" onClick={onCancel}>
+          <button type="button" className="secondary" onClick={onCancel}>
             Cancel
           </button>
           <button type="submit" className="primary" disabled={!valid}>
