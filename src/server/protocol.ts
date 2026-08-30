@@ -11,6 +11,7 @@ import type { Trace } from '../core/trace.js';
 export type ClientMessage =
   | { t: 'state:save'; state: AppState }
   | { t: 'pane:spawn'; paneId: string; cwd: string; cols: number; rows: number; model?: string; permissionMode: DevinPermissionMode; prompt?: string; resumeSessionId?: string; shellOnly?: boolean }
+  | { t: 'pane:ensure'; paneId: string; cwd: string; cols: number; rows: number; model?: string; permissionMode: DevinPermissionMode; prompt?: string; resumeSessionId?: string; shellOnly?: boolean }
   | { t: 'pane:input'; paneId: string; data: string }
   | { t: 'pane:resize'; paneId: string; cols: number; rows: number }
   | { t: 'pane:kill'; paneId: string }
@@ -24,6 +25,7 @@ export type ServerMessage =
   | { t: 'pane:data'; paneId: string; data: string }
   | { t: 'pane:status'; paneId: string; status: PaneStatus }
   | { t: 'pane:session'; paneId: string; devinSessionId: string }
+  | { t: 'pane:session-reset'; paneId: string }
   | { t: 'pane:exit'; paneId: string; code: number }
   | { t: 'pane:health'; paneId: string; health: ContextHealth }
   | { t: 'sessions:result'; reqId: string; sessions?: AcpSessionSummary[]; error?: string }

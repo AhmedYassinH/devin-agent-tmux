@@ -52,6 +52,7 @@ export interface SessionConfig {
   prompt?: string;
   /** When set, the pane launched with `devin -r <id>` instead of fresh. */
   resumeSessionId?: string;
+  shellOnly?: boolean;
   /** Absolute path of this pane's `--export` transcript (context-health input). */
   exportPath?: string;
   createdAt: number;

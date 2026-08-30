@@ -55,6 +55,35 @@ health.start();
 
 mirror = await ConvexMirror.create(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
 
+type PaneStartMessage = Extract<ClientMessage, { t: 'pane:spawn' | 'pane:ensure' }>;
+
+function startPane(msg: PaneStartMessage, resetSession: boolean): void {
+  if (resetSession) broadcast({ t: 'pane:session-reset', paneId: msg.paneId });
+  const pane = supervisor.spawn({
+    paneId: msg.paneId,
+    cwd: msg.cwd,
+    cols: msg.cols,
+    rows: msg.rows,
+    model: msg.model,
+    permissionMode: msg.permissionMode,
+    prompt: msg.prompt,
+    resumeSessionId: msg.resumeSessionId,
+    shellOnly: msg.shellOnly,
+  });
+  if (!pane) return;
+  health.track(msg.paneId, pane.exportPath);
+  broadcast({ t: 'pane:status', paneId: msg.paneId, status: 'running' });
+}
+
+function storedSession(paneId: string) {
+  const state = store.load();
+  for (const workspace of Object.values(state.workspaces)) {
+    const session = workspace.sessions[paneId];
+    if (session) return session;
+  }
+  return undefined;
+}
+
 async function handle(
   send: (message: ServerMessage) => void,
   msg: ClientMessage,
@@ -74,27 +103,38 @@ async function handle(
       break;
     }
 
-    case 'pane:spawn': {
-      const handle = supervisor.spawn({
-        paneId: msg.paneId,
-        cwd: msg.cwd,
-        cols: msg.cols,
-        rows: msg.rows,
-        model: msg.model,
-        permissionMode: msg.permissionMode,
-        prompt: msg.prompt,
-        resumeSessionId: msg.resumeSessionId,
-        shellOnly: msg.shellOnly,
-      });
-      // spawn() returns null when the directory was unusable; it has already
-      // written the reason into the pane.
-      if (handle) health.track(msg.paneId, handle.exportPath);
+    case 'pane:spawn':
+      startPane(msg, false);
       break;
-    }
 
-    case 'pane:input':
+    case 'pane:ensure':
+      if (!supervisor.has(msg.paneId)) startPane(msg, !msg.resumeSessionId);
+      break;
+
+    case 'pane:input': {
+      if (!supervisor.has(msg.paneId)) {
+        const session = storedSession(msg.paneId);
+        if (session) {
+          startPane(
+            {
+              t: 'pane:ensure',
+              paneId: session.id,
+              cwd: session.cwd,
+              cols: 80,
+              rows: 24,
+              model: session.model,
+              permissionMode: session.permissionMode,
+              prompt: session.prompt,
+              resumeSessionId: session.resumeSessionId,
+              shellOnly: session.shellOnly,
+            },
+            !session.resumeSessionId,
+          );
+        }
+      }
       supervisor.write(msg.paneId, msg.data);
       break;
+    }
 
     case 'pane:resize':
       supervisor.resize(msg.paneId, msg.cols, msg.rows);

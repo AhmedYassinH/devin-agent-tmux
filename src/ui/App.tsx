@@ -118,6 +118,13 @@ export function App() {
             return updateSession(prev, wsId, msg.paneId, { devinSessionId: msg.devinSessionId });
           });
           break;
+        case 'pane:session-reset':
+          setState((prev) => {
+            const wsId = prev.workspaceOrder.find((id) => prev.workspaces[id]?.sessions[msg.paneId]);
+            if (!wsId) return prev;
+            return updateSession(prev, wsId, msg.paneId, { devinSessionId: undefined });
+          });
+          break;
       }
     });
   }, []);
@@ -146,12 +153,27 @@ export function App() {
         permissionMode: session.permissionMode,
         prompt: session.prompt,
         resumeSessionId: session.resumeSessionId,
-        shellOnly: opts.shellOnly,
+        shellOnly: opts.shellOnly ?? session.shellOnly,
       });
       setStatuses((s) => ({ ...s, [session.id]: 'running' }));
     },
     [],
   );
+
+  const ensure = useCallback((session: SessionConfig, cols: number, rows: number) => {
+    backend.send({
+      t: 'pane:ensure',
+      paneId: session.id,
+      cwd: session.cwd,
+      cols,
+      rows,
+      model: session.model,
+      permissionMode: session.permissionMode,
+      prompt: session.prompt,
+      resumeSessionId: session.resumeSessionId,
+      shellOnly: session.shellOnly,
+    });
+  }, []);
 
   const launch = useCallback(
     (req: LaunchRequest) => {
@@ -163,6 +185,7 @@ export function App() {
         name: req.name,
         cwd: req.cwd,
         permissionMode: DEFAULT_PERMISSION_MODE,
+        shellOnly: req.shellOnly || undefined,
         createdAt: Date.now(),
       };
       setState((prev) => addSession(prev, active.id, session));
@@ -289,7 +312,11 @@ export function App() {
             ✕
           </button>
         </header>
-        <TerminalPane paneId={sessionId} backend={backend} />
+        <TerminalPane
+          paneId={sessionId}
+          backend={backend}
+          onReady={(cols, rows) => ensure(session, cols, rows)}
+        />
       </div>
     );
   };
