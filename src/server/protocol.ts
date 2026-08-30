@@ -14,6 +14,8 @@ export type ClientMessage =
   | { t: 'pane:spawn'; paneId: string; cwd: string; cols: number; rows: number; model?: string; permissionMode: DevinPermissionMode; prompt?: string; resumeSessionId?: string; shellOnly?: boolean; contextApiKey?: string }
   | { t: 'pane:ensure'; paneId: string; cwd: string; cols: number; rows: number; model?: string; permissionMode: DevinPermissionMode; prompt?: string; resumeSessionId?: string; shellOnly?: boolean; contextApiKey?: string }
   | { t: 'pane:input'; paneId: string; data: string }
+  /** Sent when a terminal mounts, to replay the pane's recent output into it. */
+  | { t: 'pane:attach'; paneId: string }
   | { t: 'pane:resize'; paneId: string; cols: number; rows: number }
   | { t: 'pane:kill'; paneId: string }
   | { t: 'sessions:list'; cwd: string; reqId: string }
@@ -29,6 +31,12 @@ export type ServerMessage =
    */
   | { t: 'env'; home: string; cwd: string; hasDefaultContextKey: boolean }
   | { t: 'pane:data'; paneId: string; data: string }
+  /**
+   * Replayed recent output for one pane, in response to `pane:attach`. Sent only
+   * to the attaching client so a terminal that just mounted (workspace switch,
+   * grid re-render, page reload) repaints instead of coming up blank.
+   */
+  | { t: 'pane:snapshot'; paneId: string; data: string }
   | { t: 'pane:status'; paneId: string; status: PaneStatus }
   | { t: 'pane:session'; paneId: string; devinSessionId: string }
   | { t: 'pane:session-reset'; paneId: string }

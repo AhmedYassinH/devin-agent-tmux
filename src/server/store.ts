@@ -8,7 +8,7 @@
  *
  *   ~/.devin-agent-tmux/
  *     state.json                       storeVersion, active workspace, order
- *     workspaces/<ws>/workspace.json   name, cwd, view, layout, session order
+ *     workspaces/<ws>/workspace.json   name, cwd, view, layout, session order, Kanban cards
  *     workspaces/<ws>/sessions/<s>.json  one SessionConfig
  *     hooks/hook.mjs                   the OSC emitter the hooks invoke
  *     panes/<pane>/config.json         per-pane devin config (user config + hooks)
@@ -21,7 +21,7 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type AppState, type SessionConfig, type Workspace, STORE_VERSION, emptyState } from '../core/models.js';
+import { type AppState, type Card, type SessionConfig, type Workspace, CARD_COLUMNS, STORE_VERSION, emptyState } from '../core/models.js';
 
 export function profileRoot(): string {
   return process.env.DEVIN_MUX_HOME || join(homedir(), '.devin-agent-tmux');
@@ -52,6 +52,19 @@ function writeJson(path: string, value: unknown): boolean {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** A card file is trusted only if the fields the UI depends on are present. */
+function isValidCard(v: unknown): v is Card {
+  if (!isRecord(v)) return false;
+  const column = v.column;
+  return (
+    typeof v.id === 'string' &&
+    typeof v.title === 'string' &&
+    typeof v.cwd === 'string' &&
+    typeof column === 'string' &&
+    (CARD_COLUMNS as string[]).includes(column)
+  );
 }
 
 export class FileStore {
@@ -120,16 +133,30 @@ export class FileStore {
         }
       }
 
+      // Kanban tickets live inside the workspace file, validated one at a time
+      // so a single corrupt ticket loses that ticket, never the board.
+      const cards: Record<string, Card> = {};
+      if (isRecord(ws.cards)) {
+        for (const card of Object.values(ws.cards)) {
+          if (isValidCard(card)) cards[card.id] = card;
+        }
+      }
+      const cardOrder = Array.isArray(ws.cardOrder)
+        ? ws.cardOrder.filter((x): x is string => typeof x === 'string' && x in cards)
+        : Object.keys(cards);
+
       workspaces[id] = {
         id,
         name: typeof ws.name === 'string' ? ws.name : id,
         cwd: typeof ws.cwd === 'string' ? ws.cwd : homedir(),
-        view: ws.view === 'tabs' ? 'tabs' : 'grid',
+        view: ws.view === 'tabs' || ws.view === 'board' ? ws.view : 'grid',
         layout: (ws.layout ?? { type: 'leaf', sessionId: null }) as Workspace['layout'],
         sessionOrder: Array.isArray(ws.sessionOrder)
           ? ws.sessionOrder.filter((x): x is string => typeof x === 'string' && x in sessions)
           : Object.keys(sessions),
         sessions,
+        cards,
+        cardOrder,
         contextApiKey: typeof ws.contextApiKey === 'string' ? ws.contextApiKey : undefined,
         updatedAt: typeof ws.updatedAt === 'number' ? ws.updatedAt : 0,
       };

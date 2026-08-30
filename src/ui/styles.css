@@ -946,6 +946,21 @@ input.mono {
   border-color: var(--hairline-strong);
   border-left-color: var(--accent);
 }
+/* A maximized pane must fill the stage — the terminal work area — and nothing
+   more, overlaying its siblings but never the sidebar, header or toolbar. It is
+   absolutely positioned, so it anchors to the nearest ancestor that is a
+   containing block. Left alone that is its own layout cell (`.split-child` is
+   relative; `.pane-slot`/`.tab-pane` are size containers, which also contain
+   absolutes), so "maximize" would either do nothing or, once those cells are
+   sized oddly, spill past the stage. Neutralize those cells while maximized so
+   the pane anchors to `.stage`, which is the one intended containing block. */
+.stage.has-max .split-child {
+  position: static;
+}
+.stage.has-max .pane-slot,
+.stage.has-max .tab-pane {
+  container-type: normal;
+}
 
 /* The header is the readout rule: engraved label flush left, measurements
    right, hairline-strong underneath doing the rule's job. */
@@ -1685,7 +1700,301 @@ input.mono {
   .modal-backdrop {
     padding: var(--s3);
   }
-  .trace {
+  .trace,
+  .card-detail {
     width: 100vw;
   }
+}
+
+/* ============================================================================
+   KANBAN BOARD — the terminal-free way to work.
+
+   A column per lifecycle stage; a card per ticket. Depth comes from the surface
+   system exactly as the panes do: canvas board, surface-1 columns, surface-2
+   cards, one brass edge on the card you are hovering. Attention is the only
+   column that carries a warning colour, because a card there is blocked on you.
+   ============================================================================ */
+
+.board-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+/* The board's own action row — count, one-line explainer, New ticket. Sits
+   under the workspace toolbar, so it is lighter than one: no bottom hairline. */
+.board-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: none;
+  padding: var(--s3) var(--s4) 0;
+}
+
+.board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4);
+  overflow-x: auto;
+}
+
+.board-col {
+  flex: 1 1 0;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  transition: border-color var(--d-fast) var(--ease-standard);
+}
+.board-col.drop-target {
+  border-color: var(--accent-edge);
+}
+.board-col.col-attention {
+  box-shadow: inset 0 2px 0 var(--warning-wash);
+}
+
+.board-col-head {
+  flex: none;
+  padding: var(--s3) var(--s3) var(--s2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.board-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.board-col-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5) var(--s3);
+  text-align: center;
+}
+
+/* ---- card tile ---------------------------------------------------------- */
+
+.kard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition:
+    border-color var(--d-fast) var(--ease-standard),
+    background var(--d-fast) var(--ease-standard);
+}
+@media (hover: hover) {
+  .kard:hover {
+    border-left-color: var(--accent);
+    background: var(--surface-3);
+  }
+}
+.kard.needs-you {
+  border-left-color: var(--warning);
+}
+
+.kard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.kard-title {
+  margin: 0;
+  font: 500 0.9375rem/1.35 var(--font-body);
+  letter-spacing: -0.006em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.kard-desc {
+  margin: 0;
+  color: var(--ink-3);
+  font: 400 0.8125rem/1.5 var(--font-body);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kard-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s1);
+}
+.kard-cwd {
+  color: var(--ink-3);
+  font: 450 0.75rem/1.3 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Compact row actions inside a card, still with a full hit area via ::after. */
+button.tiny {
+  height: 24px;
+  padding: 0 var(--s2);
+  font-size: 0.75rem;
+}
+button.icon.tiny {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+
+/* ---- ticket dialog ------------------------------------------------------ */
+
+.card-dialog {
+  width: min(560px, 100%);
+}
+textarea {
+  width: 100%;
+  padding: var(--s3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 400 0.9375rem/1.55 var(--font-body);
+  resize: vertical;
+  transition: border-color var(--d-fast) var(--ease-standard);
+}
+textarea::placeholder {
+  color: var(--ink-3);
+}
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: var(--ring);
+}
+
+/* ---- ticket detail sheet ------------------------------------------------ */
+
+.card-detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(720px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-left: 1px solid var(--hairline);
+  box-shadow: var(--shadow-overlay);
+  animation: fade-in var(--d-base) var(--ease-entrance) both;
+}
+.card-detail > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  flex: none;
+  padding: var(--s5) var(--s5) var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+.card-detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+.card-detail h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: 600 1.125rem/1.35 var(--font-body);
+  letter-spacing: -0.008em;
+  overflow-wrap: anywhere;
+}
+.card-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+.card-detail-cwd {
+  color: var(--ink-3);
+  font: 450 0.75rem/1.3 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-prompt-panel {
+  flex: none;
+  border-bottom: 1px solid var(--hairline);
+}
+.card-prompt-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--s5);
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+.card-prompt-toggle .rule-label {
+  color: var(--ink-2);
+}
+.card-prompt-text {
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0 var(--s5) var(--s4);
+  color: var(--ink-2);
+  font: 400 0.8125rem/1.6 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.card-detail-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.card-term {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.card-term > * {
+  flex: 1;
+  min-width: 0;
+}
+.card-detail-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s6);
+  text-align: center;
+  color: var(--ink-3);
+}
+.card-detail-empty p {
+  max-width: 42ch;
+}
+
+.card-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: none;
+  padding: var(--s4) var(--s5);
+  border-top: 1px solid var(--hairline);
 }

@@ -6,6 +6,7 @@ export * from './osc.js';
 export * from './status.js';
 export * from './layout.js';
 export * from './workspace.js';
+export * from './board.js';
 export * from './acp.js';
 export * from './trace.js';
 export * from './context-health.js';

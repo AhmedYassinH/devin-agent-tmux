@@ -54,6 +54,8 @@ export class Backend {
   private latestEnv: ServerMessage | null = null;
   private latestRuntime = new Map<string, ServerMessage>();
   private snapshots = new Map<string, { snapshot: string; outputVersion: number }>();
+  private snapshotsLoaded = false;
+  private pendingAttachments = new Set<string>();
   private seenEvents = new Set<string>();
   private readonly profileKey = import.meta.env.VITE_CONVEX_PROFILE || 'default';
 
@@ -81,6 +83,8 @@ export class Backend {
             sessionOrder: row.sessionOrder,
             layout: JSON.parse(row.layout),
             sessions: JSON.parse(row.sessions),
+            cards: row.cards ? JSON.parse(row.cards) : {},
+            cardOrder: row.cardOrder ?? [],
             updatedAt: row.updatedAt,
           };
         } catch {
@@ -127,10 +131,14 @@ export class Backend {
             snapshot: row.snapshot,
             outputVersion: row.outputVersion,
           });
-          if (row.snapshot) this.emit({ t: 'pane:data', paneId: row.paneId, data: row.snapshot });
         }
       })
-      .finally(subscribeTerminalState);
+      .finally(() => {
+        this.snapshotsLoaded = true;
+        for (const paneId of this.pendingAttachments) this.emitSnapshot(paneId);
+        this.pendingAttachments.clear();
+        subscribeTerminalState();
+      });
 
     this.convex.onUpdate('mux:realtimeEvents', args, (rows) => {
       for (const row of rows as any[]) {
@@ -250,13 +258,28 @@ export class Backend {
       });
   }
 
+  attach(paneId: string): void {
+    if (!this.convex) {
+      this.send({ t: 'pane:attach', paneId });
+      return;
+    }
+    if (this.snapshotsLoaded) this.emitSnapshot(paneId);
+    else this.pendingAttachments.add(paneId);
+  }
+
+  private emitSnapshot(paneId: string): void {
+    const message: ServerMessage = {
+      t: 'pane:snapshot',
+      paneId,
+      data: this.snapshots.get(paneId)?.snapshot ?? '',
+    };
+    for (const listener of this.listeners) listener(message);
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     if (this.latestEnv) listener(this.latestEnv);
     if (this.latestState) listener(this.latestState);
-    for (const [paneId, value] of this.snapshots) {
-      if (value.snapshot) listener({ t: 'pane:data', paneId, data: value.snapshot });
-    }
     for (const message of this.latestRuntime.values()) listener(message);
     return () => this.listeners.delete(listener);
   }

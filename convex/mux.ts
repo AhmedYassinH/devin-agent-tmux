@@ -17,6 +17,8 @@ const workspaceArg = v.object({
   sessionOrder: v.array(v.string()),
   layout: v.string(),
   sessions: v.string(),
+  cards: v.optional(v.string()),
+  cardOrder: v.optional(v.array(v.string())),
   updatedAt: v.number(),
 });
 
@@ -62,6 +64,8 @@ export const pushState = mutation({
         sessionOrder: ws.sessionOrder,
         layout: ws.layout,
         sessions: ws.sessions,
+        cards: ws.cards,
+        cardOrder: ws.cardOrder,
         updatedAt: ws.updatedAt || now,
       };
       if (row) await ctx.db.patch(row._id, doc);

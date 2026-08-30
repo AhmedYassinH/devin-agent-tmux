@@ -255,7 +255,7 @@ trace "Implement plan-b03afdaeb5d4e16d"
   structured diffs: 49
 ```
 
-**Unit tests**: `npm test` → 87 tests across launch-argument building, the OSC
+**Unit tests**: `npm test` → 94 tests across launch-argument building, the OSC
 scanner (including sequences split across reads), the trace fold, layout ops, the
 context-health estimator, the context.dev config merge, the per-pane config
 directory and ACP error classification.

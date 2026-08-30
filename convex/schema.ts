@@ -32,6 +32,8 @@ export default defineSchema({
     layout: v.string(),
     /** JSON: Record<string, SessionConfig>. Opaque on purpose. */
     sessions: v.string(),
+    cards: v.optional(v.string()),
+    cardOrder: v.optional(v.array(v.string())),
     updatedAt: v.number(),
   })
     .index('by_profile', ['profileKey'])

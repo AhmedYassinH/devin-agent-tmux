@@ -229,6 +229,8 @@ export class ConvexMirror {
             // migrating two stores every time a layout gains a field.
             layout: JSON.stringify(ws.layout),
             sessions: JSON.stringify(ws.sessions),
+            cards: JSON.stringify(ws.cards),
+            cardOrder: ws.cardOrder,
             sessionOrder: ws.sessionOrder,
           })),
       });

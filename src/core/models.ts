@@ -63,7 +63,7 @@ export type LayoutNode =
   | { type: 'leaf'; sessionId: string | null }
   | { type: 'split'; dir: 'row' | 'col'; sizes: number[]; children: LayoutNode[] };
 
-export type WorkspaceView = 'grid' | 'tabs';
+export type WorkspaceView = 'grid' | 'tabs' | 'board';
 
 export interface Workspace {
   id: string;
@@ -76,6 +76,16 @@ export interface Workspace {
   sessionOrder: string[];
   sessions: Record<string, SessionConfig>;
   /**
+   * Kanban tickets for this workspace, and their board order.
+   *
+   * Per-workspace rather than app-global: a ticket runs an agent in the
+   * workspace's directory and bills to its context.dev key, so the board is
+   * just a third way to look at one workspace — alongside the grid and the tab
+   * strip — not a separate place. See core/board.ts.
+   */
+  cards: Record<string, Card>;
+  cardOrder: string[];
+  /**
    * context.dev API key for the panes in this workspace.
    *
    * Collected when the workspace is created and used at spawn time to write the
@@ -86,6 +96,55 @@ export interface Workspace {
    */
   contextApiKey?: string;
   updatedAt: number;
+}
+
+/**
+ * A Kanban column, and the whole lifecycle of a ticket.
+ *
+ * A card starts in `backlog` (a ticket the user wrote, no agent yet). Clicking
+ * Start spawns a Devin session with the card's description as its first-turn
+ * prompt, and from then on the column tracks the pane's live status rather than
+ * being dragged by hand — see `columnForStatus` in core/board.ts:
+ *
+ *   running -> in-progress · waiting -> attention · exited -> done
+ *
+ * This is the board's answer to "ditch the terminal": the ticket IS the unit of
+ * work, and its column is the true state of the agent working it.
+ */
+export type CardColumn = 'backlog' | 'in-progress' | 'attention' | 'done';
+
+export const CARD_COLUMNS: CardColumn[] = ['backlog', 'in-progress', 'attention', 'done'];
+
+/**
+ * One ticket on the Kanban board.
+ *
+ * The board is app-level, not owned by a workspace: a card carries its own
+ * `cwd`, so tickets for different repos can live on one board and a user can
+ * work entirely from here without ever opening the terminal grid.
+ *
+ * `paneId` doubles as the id of the PTY the server supervises — the same
+ * mechanism a terminal pane uses, so a card's live session gets status, context
+ * health and an embedded terminal for free. Undefined until the card is Started.
+ */
+export interface Card {
+  id: string;
+  title: string;
+  /** Handed to Devin as the first-turn prompt when the card is Started. */
+  description: string;
+  /** Working directory the agent runs in. Absolute, or `~/…`. */
+  cwd: string;
+  column: CardColumn;
+  /** Set on Start; the id of the supervised pane. Also see `devinSessionId`. */
+  paneId?: string;
+  /** Devin's own session slug, learned from the SessionStart hook (see §4). */
+  devinSessionId?: string;
+  model?: string;
+  permissionMode: DevinPermissionMode;
+  /** context.dev key for this card's session; falls back to CONTEXT_DEV_API_KEY. */
+  contextApiKey?: string;
+  createdAt: number;
+  /** When Start was first clicked. */
+  startedAt?: number;
 }
 
 export interface AppState {
@@ -102,7 +161,12 @@ export interface AppState {
 export const STORE_VERSION = 1;
 
 export function emptyState(): AppState {
-  return { storeVersion: STORE_VERSION, activeWorkspaceId: null, workspaceOrder: [], workspaces: {} };
+  return {
+    storeVersion: STORE_VERSION,
+    activeWorkspaceId: null,
+    workspaceOrder: [],
+    workspaces: {},
+  };
 }
 
 /** URL-safe id. Not a uuid — these show up in file paths and the sidebar. */

@@ -31,13 +31,21 @@ export function NameDialog({
 }: {
   spec: NameDialogSpec;
   onCancel: () => void;
-  /** `cwd` and `contextApiKey` are only meaningful for create-workspace. */
-  onSubmit: (name: string, cwd: string, contextApiKey: string) => void;
+  /**
+   * `cwd`, `contextApiKey` and `asBoard` are only meaningful for
+   * create-workspace. `asBoard` fixes the workspace as a Kanban board rather
+   * than a terminal grid — the choice is made here, at creation, because a
+   * workspace's kind is one-way: a board never becomes a terminal and vice
+   * versa, so a running workspace can never be broken by a mode switch.
+   */
+  onSubmit: (name: string, cwd: string, contextApiKey: string, asBoard: boolean) => void;
 }) {
   const creating = spec.mode === 'create-workspace';
   const [name, setName] = useState(creating ? '' : spec.name);
   const [cwd, setCwd] = useState(creating ? spec.defaultCwd : '');
   const [contextKey, setContextKey] = useState('');
+  /** false = terminal grid (default), true = Kanban board. Create-only. */
+  const [asBoard, setAsBoard] = useState(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -61,7 +69,7 @@ export function NameDialog({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid) return;
-    onSubmit(trimmedName, trimmedCwd, contextKey.trim());
+    onSubmit(trimmedName, trimmedCwd, contextKey.trim(), creating && asBoard);
   };
 
   return (
@@ -113,6 +121,38 @@ export function NameDialog({
               folder.
             </small>
           </label>
+        )}
+
+        {creating && (
+          <div className="field">
+            <span>Workspace kind</span>
+            {/* One-way: a board never becomes a terminal, and a terminal never
+                becomes a board. Choosing here keeps a running workspace from
+                being broken by a later mode switch. */}
+            <div className="segmented" role="group" aria-label="Workspace kind">
+              <button
+                type="button"
+                className={!asBoard ? 'on' : ''}
+                aria-pressed={!asBoard}
+                onClick={() => setAsBoard(false)}
+              >
+                ❯ Terminal
+              </button>
+              <button
+                type="button"
+                className={asBoard ? 'on' : ''}
+                aria-pressed={asBoard}
+                onClick={() => setAsBoard(true)}
+              >
+                ▤ Board
+              </button>
+            </div>
+            <small>
+              {asBoard
+                ? 'A Kanban board: write tickets and Devin picks them up and builds them. This is fixed — a board workspace has no terminal grid.'
+                : 'A terminal grid: run Devin sessions side by side in resizable panes. This is fixed — you cannot switch it to a board later.'}
+            </small>
+          </div>
         )}
 
         {creating && (

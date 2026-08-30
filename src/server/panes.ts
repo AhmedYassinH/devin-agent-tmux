@@ -25,6 +25,17 @@ import { resolveCwd } from './paths.js';
 
 const isWindows = platform() === 'win32';
 
+/**
+ * How much recent PTY output to keep per pane so a terminal that (re)attaches
+ * can be repainted. A client attaches whenever its TerminalPane mounts — on a
+ * workspace switch, a grid re-render, or a full page reload — and the PTY it
+ * points at has been running the whole time. Without a replayable buffer the
+ * fresh xterm would show nothing until the next byte arrived, which reads as
+ * "the session lost its state". `devin` runs in the alternate screen and
+ * redraws often, so a front-trimmed byte window repaints cleanly in practice.
+ */
+const MAX_BUFFER_BYTES = 256 * 1024;
+
 export interface SpawnOptions {
   paneId: string;
   cwd: string;
@@ -58,6 +69,12 @@ function userConfigPath(): string {
 export class PaneSupervisor {
   private panes = new Map<string, PaneHandle>();
   private scanners = new Map<string, OscScanner>();
+  /**
+   * Recent output per pane, replayed on attach. Kept separate from `panes` so
+   * it survives a natural exit — a reattaching terminal should still show the
+   * final screen and the "[process exited]" line, not go blank.
+   */
+  private buffers = new Map<string, string>();
 
   constructor(
     private store: FileStore,
@@ -111,7 +128,7 @@ export class PaneSupervisor {
     // with no output, which is indistinguishable from `devin` itself crashing.
     const cwd = resolveCwd(opts.cwd, homedir());
     if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory()) {
-      this.handlers.onData(
+      this.emit(
         opts.paneId,
         `\r\n\x1b[1;31mCannot start here.\x1b[0m\r\n` +
           `  \x1b[2mworking directory:\x1b[0m ${opts.cwd}\r\n` +
@@ -172,17 +189,40 @@ export class PaneSupervisor {
       // never visible in the pane.
       const { output, signals } = scanner.push(data);
       for (const signal of signals) this.handlers.onSignal(opts.paneId, signal);
-      if (output) this.handlers.onData(opts.paneId, output);
+      if (output) this.emit(opts.paneId, output);
     });
     pty.onExit(({ exitCode }) => {
       this.panes.delete(opts.paneId);
       this.scanners.delete(opts.paneId);
+      // Mirror the client's exit line into the buffer so a terminal that
+      // attaches after the process is gone still sees why it stopped.
+      this.append(opts.paneId, `\r\n\x1b[2m[process exited with code ${exitCode}]\x1b[0m\r\n`);
       this.handlers.onExit(opts.paneId, exitCode);
     });
 
     const handle: PaneHandle = { paneId: opts.paneId, pty, exportPath };
     this.panes.set(opts.paneId, handle);
     return handle;
+  }
+
+  /** Buffer output, then forward it live to the connected clients. */
+  private emit(paneId: string, data: string): void {
+    this.append(paneId, data);
+    this.handlers.onData(paneId, data);
+  }
+
+  /** Append to the pane's replay buffer, trimming the oldest bytes past the cap. */
+  private append(paneId: string, data: string): void {
+    const next = (this.buffers.get(paneId) ?? '') + data;
+    this.buffers.set(
+      paneId,
+      next.length > MAX_BUFFER_BYTES ? next.slice(next.length - MAX_BUFFER_BYTES) : next,
+    );
+  }
+
+  /** The recent output for a pane, for a client that is (re)attaching to it. */
+  snapshot(paneId: string): string | undefined {
+    return this.buffers.get(paneId);
   }
 
   write(paneId: string, data: string): void {
@@ -198,6 +238,9 @@ export class PaneSupervisor {
   }
 
   kill(paneId: string): void {
+    // Drop the replay buffer even if the pane already exited: a kill means the
+    // pane is being closed or respawned, so its old output should not reattach.
+    this.buffers.delete(paneId);
     const handle = this.panes.get(paneId);
     if (!handle) return;
     this.panes.delete(paneId);

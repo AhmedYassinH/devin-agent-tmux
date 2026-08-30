@@ -60,15 +60,30 @@ export function TerminalPane({
         if (disposeRequested && pendingWrites === 0) term.dispose();
       });
     };
+    let attached = false;
+    const pending: string[] = [];
     let off = () => {};
     const subscribeFrame = requestAnimationFrame(() => {
       if (disposed) return;
       off = backend.subscribe((msg) => {
-        if (msg.t === 'pane:data' && msg.paneId === paneId) write(msg.data);
+        if (msg.t === 'pane:snapshot' && msg.paneId === paneId && !attached) {
+          attached = true;
+          if (msg.data) write(msg.data);
+          for (const chunk of pending) write(chunk);
+          pending.length = 0;
+          return;
+        }
+        if (msg.t === 'pane:data' && msg.paneId === paneId) {
+          if (attached) write(msg.data);
+          else pending.push(msg.data);
+        }
         if (msg.t === 'pane:exit' && msg.paneId === paneId) {
-          write(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+          const line = `\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`;
+          if (attached) write(line);
+          else pending.push(line);
         }
       });
+      backend.attach(paneId);
     });
 
     // ResizeObserver rather than a window listener: panes resize when a divider
