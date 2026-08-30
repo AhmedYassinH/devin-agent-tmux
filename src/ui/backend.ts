@@ -14,6 +14,7 @@ import type { Trace } from '../core/trace.js';
 type Listener = (msg: ServerMessage) => void;
 type ConvexClientLike = {
   mutation: (name: unknown, args: unknown) => Promise<unknown>;
+  query: (name: unknown, args: unknown) => Promise<any>;
   onUpdate: (
     name: unknown,
     args: unknown,
@@ -58,7 +59,8 @@ export class Backend {
 
   constructor(private url = `ws://${location.hostname}:5173/pty`) {
     const convexUrl = import.meta.env.VITE_CONVEX_URL;
-    if (convexUrl) this.connectConvex(convexUrl);
+    const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1';
+    if (convexUrl && !local) this.connectConvex(convexUrl);
     else this.connect();
   }
 
@@ -105,19 +107,30 @@ export class Backend {
       }
     });
 
-    this.convex.onUpdate('mux:terminalState', args, (rows) => {
-      for (const row of rows as any[]) {
-        const previous = this.snapshots.get(row.paneId);
-        this.snapshots.set(row.paneId, {
-          snapshot: row.snapshot,
-          outputVersion: row.outputVersion,
-        });
-        if (!previous && row.snapshot) this.emit({ t: 'pane:data', paneId: row.paneId, data: row.snapshot });
-        else if (previous && row.outputVersion > previous.outputVersion && row.lastChunk) {
-          this.emit({ t: 'pane:data', paneId: row.paneId, data: row.lastChunk });
+    const subscribeTerminalState = () => {
+      this.convex?.onUpdate('mux:terminalState', args, (rows) => {
+        for (const row of rows as any[]) {
+          const previous = this.snapshots.get(row.paneId);
+          if (previous && row.outputVersion <= previous.outputVersion) continue;
+          const snapshot = `${previous?.snapshot ?? ''}${row.lastChunk ?? ''}`.slice(-200_000);
+          this.snapshots.set(row.paneId, { snapshot, outputVersion: row.outputVersion });
+          if (row.lastChunk) this.emit({ t: 'pane:data', paneId: row.paneId, data: row.lastChunk });
         }
-      }
-    });
+      });
+    };
+
+    void this.convex
+      .query('mux:terminalSnapshots', args)
+      .then((rows) => {
+        for (const row of rows as any[]) {
+          this.snapshots.set(row.paneId, {
+            snapshot: row.snapshot,
+            outputVersion: row.outputVersion,
+          });
+          if (row.snapshot) this.emit({ t: 'pane:data', paneId: row.paneId, data: row.snapshot });
+        }
+      })
+      .finally(subscribeTerminalState);
 
     this.convex.onUpdate('mux:realtimeEvents', args, (rows) => {
       for (const row of rows as any[]) {

@@ -213,13 +213,35 @@ export const appendOutput = mutation({
   },
 });
 
-export const terminalState = query({
+export const terminalSnapshots = query({
   args: { profileKey: v.optional(v.string()) },
-  handler: async (ctx, args) =>
-    ctx.db
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
       .query('terminalPanes')
       .withIndex('by_profile', (q) => q.eq('profileKey', args.profileKey ?? 'default'))
-      .collect(),
+      .collect();
+    return rows.map((row) => ({
+      paneId: row.paneId,
+      snapshot: row.snapshot,
+      outputVersion: row.outputVersion,
+    }));
+  },
+});
+
+export const terminalState = query({
+  args: { profileKey: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query('terminalPanes')
+      .withIndex('by_profile', (q) => q.eq('profileKey', args.profileKey ?? 'default'))
+      .collect();
+    return rows.map((row) => ({
+      paneId: row.paneId,
+      lastChunk: row.lastChunk,
+      outputVersion: row.outputVersion,
+      updatedAt: row.updatedAt,
+    }));
+  },
 });
 
 export const publishEvent = mutation({
