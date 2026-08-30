@@ -6,12 +6,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AppState,
+  type Card,
+  type CardColumn,
   type PaneStatus,
   type SessionConfig,
   DEFAULT_PERMISSION_MODE,
   emptyState,
   makeId,
 } from '../core/models.js';
+import {
+  applyCardSession,
+  applyCardStatus,
+  createCard,
+  markStarted,
+  moveCard,
+  removeCard,
+  updateCard,
+} from '../core/board.js';
 import { templateForCount } from '../core/layout.js';
 import {
   addSession,
@@ -38,6 +49,8 @@ import { SessionPicker } from './SessionPicker.js';
 import { TracePanel } from './TracePanel.js';
 import { NameDialog, type NameDialogSpec } from './NameDialog.js';
 import { Guide } from './Guide.js';
+import { BoardView } from './BoardView.js';
+import type { CardDraft } from './CardDialog.js';
 import { ContextBadge, StatusBadge } from './StatusBadge.js';
 
 const backend = new Backend();
@@ -90,6 +103,11 @@ export function App() {
   // which would bounce the same state back and forth between two open tabs.
   const applyingRemote = useRef(false);
 
+  // Latest state, for event handlers that must read it without being rebuilt on
+  // every change (e.g. deleting a card needs its paneId to kill the process).
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
     return backend.subscribe((msg) => {
       switch (msg.t) {
@@ -102,9 +120,14 @@ export function App() {
           break;
         case 'pane:status':
           setStatuses((s) => ({ ...s, [msg.paneId]: msg.status }));
+          // A ticket's column follows its agent: this is what lets the board run
+          // itself. applyCardStatus is a no-op for a terminal-grid pane, so this
+          // is safe to run for every status regardless of where the pane lives.
+          setState((prev) => applyCardStatus(prev, msg.paneId, msg.status));
           break;
         case 'pane:exit':
           setStatuses((s) => ({ ...s, [msg.paneId]: 'exited' }));
+          setState((prev) => applyCardStatus(prev, msg.paneId, 'exited'));
           break;
         case 'pane:health':
           setHealths((h) => ({ ...h, [msg.paneId]: msg.health }));
@@ -112,11 +135,15 @@ export function App() {
         case 'pane:session':
           // Devin chose its session id and the SessionStart hook reported it.
           // Persist immediately: this id is what `devin -r` needs later, and a
-          // pane that crashes before we store it is unresumable.
+          // pane that crashes before we store it is unresumable. A pane belongs
+          // either to a workspace session or to a board card — record on whichever
+          // owns it.
           setState((prev) => {
             const wsId = prev.workspaceOrder.find((id) => prev.workspaces[id]?.sessions[msg.paneId]);
-            if (!wsId) return prev;
-            return updateSession(prev, wsId, msg.paneId, { devinSessionId: msg.devinSessionId });
+            const next = wsId
+              ? updateSession(prev, wsId, msg.paneId, { devinSessionId: msg.devinSessionId })
+              : prev;
+            return applyCardSession(next, msg.paneId, msg.devinSessionId);
           });
           break;
       }
@@ -217,6 +244,58 @@ export function App() {
   const closeSession = useCallback((wsId: string, sessionId: string) => {
     backend.send({ t: 'pane:kill', paneId: sessionId });
     setState((prev) => removeSession(prev, wsId, sessionId));
+  }, []);
+
+  // ---- Kanban board handlers -------------------------------------------------
+
+  /**
+   * Start (or restart) a ticket: spawn a Devin session whose first-turn prompt
+   * IS the ticket description. The pane reuses the card's own id space, so
+   * status, context health and the embedded terminal all key off it. A restart
+   * reuses the same paneId, so the server kills the old process and the card's
+   * terminal stays bound to the one live session. The context.dev key comes from
+   * the ticket's own field, else the owning workspace's — either falls back to
+   * the server's .env default (undefined is meaningful; see core/mcp.ts).
+   */
+  const startCard = useCallback((wsId: string, card: Card) => {
+    const paneId = card.paneId ?? makeId('pane');
+    setState((prev) => markStarted(prev, wsId, card.id, paneId));
+    backend.send({
+      t: 'pane:spawn',
+      paneId,
+      cwd: card.cwd,
+      cols: 80,
+      rows: 24,
+      model: card.model,
+      permissionMode: card.permissionMode,
+      prompt: card.description,
+      contextApiKey: card.contextApiKey ?? stateRef.current.workspaces[wsId]?.contextApiKey,
+    });
+    setStatuses((s) => ({ ...s, [paneId]: 'running' }));
+  }, []);
+
+  const stopCard = useCallback((_wsId: string, card: Card) => {
+    if (card.paneId) backend.send({ t: 'pane:kill', paneId: card.paneId });
+  }, []);
+
+  const createCardHandler = useCallback((wsId: string, draft: CardDraft) => {
+    setState((prev) => createCard(prev, wsId, draft).state);
+  }, []);
+
+  const updateCardHandler = useCallback((wsId: string, id: string, fields: Partial<Card>) => {
+    setState((prev) => updateCard(prev, wsId, id, fields));
+  }, []);
+
+  const deleteCardHandler = useCallback((wsId: string, id: string) => {
+    // Kill a running agent before dropping its card, so we don't orphan a
+    // process holding a session lock (which would make that session unloadable).
+    const card = stateRef.current.workspaces[wsId]?.cards[id];
+    if (card?.paneId) backend.send({ t: 'pane:kill', paneId: card.paneId });
+    setState((prev) => removeCard(prev, wsId, id));
+  }, []);
+
+  const moveCardHandler = useCallback((wsId: string, id: string, column: CardColumn) => {
+    setState((prev) => moveCard(prev, wsId, id, column));
   }, []);
 
   // Default to a directory that actually exists: the server's cwd, else home.
@@ -415,50 +494,82 @@ export function App() {
                 </span>
               </span>
 
-              <div className="segmented" role="group" aria-label="View">
-                <button
-                  className={active.view === 'grid' ? 'on' : ''}
-                  aria-pressed={active.view === 'grid'}
-                  onClick={() => setState((p) => setWorkspaceView(p, active.id, 'grid'))}
-                >
-                  ⊞ Grid
-                </button>
-                <button
-                  className={active.view === 'tabs' ? 'on' : ''}
-                  aria-pressed={active.view === 'tabs'}
-                  onClick={() => setState((p) => setWorkspaceView(p, active.id, 'tabs'))}
-                >
-                  ▯ Tabs
-                </button>
-              </div>
+              {/* A workspace's kind is fixed at creation (see NameDialog): a
+                  board has no terminal grid and a terminal never becomes a
+                  board, so there is no cross-kind switch to break a running
+                  workspace. A terminal workspace still toggles Grid<->Tabs; a
+                  board shows a static kind indicator instead. */}
+              {active.view === 'board' ? (
+                <span className="tag" title="This is a Kanban board workspace">
+                  ▤ Board
+                </span>
+              ) : (
+                <div className="segmented" role="group" aria-label="View">
+                  <button
+                    className={active.view === 'grid' ? 'on' : ''}
+                    aria-pressed={active.view === 'grid'}
+                    onClick={() => setState((p) => setWorkspaceView(p, active.id, 'grid'))}
+                  >
+                    ⊞ Grid
+                  </button>
+                  <button
+                    className={active.view === 'tabs' ? 'on' : ''}
+                    aria-pressed={active.view === 'tabs'}
+                    onClick={() => setState((p) => setWorkspaceView(p, active.id, 'tabs'))}
+                  >
+                    ▯ Tabs
+                  </button>
+                </div>
+              )}
 
-              <label className="terminals">
-                <span>Terminals</span>
-                <select
-                  value={paneCount}
-                  onChange={(e) =>
-                    setState((p) => applyTemplate(p, active.id, templateForCount(Number(e.target.value))))
-                  }
-                >
-                  {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* Pane-count controls belong to the terminal views only; the
+                  board manages its own tickets. */}
+              {active.view !== 'board' && (
+                <>
+                  <label className="terminals">
+                    <span>Terminals</span>
+                    <select
+                      value={paneCount}
+                      onChange={(e) =>
+                        setState((p) => applyTemplate(p, active.id, templateForCount(Number(e.target.value))))
+                      }
+                    >
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <button
-                title="Reset the split sizes for this pane count. Running panes keep their processes."
-                onClick={() => setState((p) => applyTemplate(p, active.id, templateForCount(paneCount)))}
-              >
-                ↺ Reset
-              </button>
+                  <button
+                    title="Reset the split sizes for this pane count. Running panes keep their processes."
+                    onClick={() => setState((p) => applyTemplate(p, active.id, templateForCount(paneCount)))}
+                  >
+                    ↺ Reset
+                  </button>
+                </>
+              )}
 
               <span className="spacer" />
               <button onClick={() => setPicker(true)}>Sessions…</button>
             </header>
 
+            {active.view === 'board' ? (
+              <BoardView
+                workspace={active}
+                statuses={statuses}
+                healths={healths}
+                hasDefaultContextKey={env?.hasDefaultContextKey ?? false}
+                backend={backend}
+                onCreateCard={(draft) => createCardHandler(active.id, draft)}
+                onUpdateCard={(id, fields) => updateCardHandler(active.id, id, fields)}
+                onDeleteCard={(id) => deleteCardHandler(active.id, id)}
+                onStartCard={(card) => startCard(active.id, card)}
+                onStopCard={(card) => stopCard(active.id, card)}
+                onMoveCard={(id, column) => moveCardHandler(active.id, id, column)}
+              />
+            ) : (
             <section className={`stage ${maximized ? 'has-max' : ''}`}>
               {active.view === 'grid' ? (
                 <LayoutView
@@ -496,6 +607,7 @@ export function App() {
                 </div>
               )}
             </section>
+            )}
           </>
         )}
       </main>
@@ -523,11 +635,16 @@ export function App() {
         <NameDialog
           spec={dialog}
           onCancel={() => setDialog(null)}
-          onSubmit={(name, cwd, contextApiKey) => {
+          onSubmit={(name, cwd, contextApiKey, asBoard) => {
             setState((p) => {
               switch (dialog.mode) {
-                case 'create-workspace':
-                  return createWorkspace(p, name, cwd, undefined, contextApiKey);
+                case 'create-workspace': {
+                  const next = createWorkspace(p, name, cwd, undefined, contextApiKey);
+                  // The kind is chosen once, here — a board workspace has no
+                  // terminal grid and never gains one.
+                  const id = next.activeWorkspaceId;
+                  return asBoard && id ? setWorkspaceView(next, id, 'board') : next;
+                }
                 case 'rename-workspace':
                   return renameWorkspace(p, dialog.id, name);
                 case 'rename-session':

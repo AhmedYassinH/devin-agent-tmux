@@ -63,6 +63,8 @@ export function createWorkspace(
     layout: templateLayout(template),
     sessionOrder: [],
     sessions: {},
+    cards: {},
+    cardOrder: [],
     contextApiKey: contextApiKey?.trim() || undefined,
     updatedAt: Date.now(),
   };

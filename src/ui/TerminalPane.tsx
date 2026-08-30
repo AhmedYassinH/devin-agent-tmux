@@ -49,12 +49,35 @@ export function TerminalPane({
 
     term.onData((data) => backend.send({ t: 'pane:input', paneId, data }));
 
+    // The PTY this terminal points at has usually been running before this
+    // xterm existed — we mount fresh on a workspace switch, a grid re-render, or
+    // a page reload. `pane:attach` asks the server to replay the pane's recent
+    // output so we repaint instead of coming up blank. Until that snapshot lands
+    // we queue live bytes and flush them after it, so the older snapshot can
+    // never be written on top of newer live output.
+    let attached = false;
+    const pending: string[] = [];
+
     const off = backend.subscribe((msg) => {
-      if (msg.t === 'pane:data' && msg.paneId === paneId) term.write(msg.data);
+      if (msg.t === 'pane:snapshot' && msg.paneId === paneId && !attached) {
+        attached = true;
+        if (msg.data) term.write(msg.data);
+        for (const chunk of pending) term.write(chunk);
+        pending.length = 0;
+        return;
+      }
+      if (msg.t === 'pane:data' && msg.paneId === paneId) {
+        if (attached) term.write(msg.data);
+        else pending.push(msg.data);
+      }
       if (msg.t === 'pane:exit' && msg.paneId === paneId) {
-        term.write(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+        const line = `\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`;
+        if (attached) term.write(line);
+        else pending.push(line);
       }
     });
+
+    backend.send({ t: 'pane:attach', paneId });
 
     // ResizeObserver rather than a window listener: panes resize when a divider
     // moves or a sibling closes, neither of which resizes the window.

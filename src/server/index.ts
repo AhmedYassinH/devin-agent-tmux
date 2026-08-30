@@ -101,6 +101,16 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
       supervisor.write(msg.paneId, msg.data);
       break;
 
+    case 'pane:attach': {
+      // Replay the pane's recent output to THIS client only. The live stream is
+      // still broadcast to everyone; a reattaching terminal came up empty and
+      // needs the backlog to repaint. Always reply — even with empty data — so
+      // the client can stop queuing live output and start writing it directly.
+      const data = supervisor.snapshot(msg.paneId) ?? '';
+      ws.send(JSON.stringify({ t: 'pane:snapshot', paneId: msg.paneId, data } satisfies ServerMessage));
+      break;
+    }
+
     case 'pane:resize':
       supervisor.resize(msg.paneId, msg.cols, msg.rows);
       break;

@@ -4,8 +4,12 @@ Read this first. It records **why** things are the way they are, and the
 empirically-verified facts about the Devin CLI that were expensive to discover.
 Re-deriving them costs real time; contradicting them will break the app.
 
-**Status:** working v1. 87 tests pass, typecheck clean, production build succeeds,
+**Status:** working v1. 94 tests pass, typecheck clean, production build succeeds,
 both halves verified end-to-end against real Devin CLI `3000.6.7`.
+
+**If you are a new agent picking this up: read §10 and §11 first.** They cover the
+context.dev MCP integration and the exact state the last session left behind,
+including one unresolved risk (§11) that will bite inside this repo specifically.
 
 ---
 
@@ -244,7 +248,7 @@ the hooks, `XDG_CONFIG_HOME` carries the MCP servers. See §3 trap 9.
 ```bash
 npm install          # postinstall fixes node-pty's spawn-helper exec bit
 npm run dev          # Vite :5173 + PTY/ACP server :5177
-npm test             # 87 tests
+npm test             # 94 tests
 npm run typecheck
 ```
 
@@ -279,7 +283,9 @@ trace "Implement plan-b03afdaeb5d4e16d"
 
 - **UI has never been driven by an automated test.** Server, core, ACP and PTY
   paths are covered by scripts + unit tests; the React layer is typechecked and
-  hand-verified only.
+  build-verified only. It has been *looked at* in a browser under Playwright
+  (renders correctly, light mode) but nothing asserts on it, so any React change
+  is still unguarded.
 - **Convex is unconfigured.** Schema and mirror code exist; needs `npx convex dev`
   once. Server logs `[convex] no CONVEX_URL set — running local-only`.
 - **Not ported from Chorus:** agent swarms with per-agent git-worktree isolation,
@@ -318,7 +324,175 @@ you're satisfied (`git branch -D backup-pre-rewrite`).
 
 ## 9. Suggested next steps
 
-1. Drive the UI in a browser and fix what breaks — the least-verified layer.
+1. **Resolve the `.mcp.json` precedence risk in §11.** Highest value: it is the
+   one open question about a feature that is otherwise finished and verified.
 2. `npx convex dev` and confirm the mirror actually writes.
 3. Decide on swarms: native `run_subagent` vs. Chorus-style external fan-out.
 4. Consider live trace via the hook event-stream route.
+5. Give the React layer at least a smoke render test — it is the only layer with
+   no automated coverage at all.
+
+---
+
+## 10. context.dev — the default MCP server
+
+Every pane starts with the [context.dev](https://context.dev) MCP server already
+connected: web search, scraping, crawling, structured extraction, document
+parsing. No per-session setup, and no user action required.
+
+### Where the key comes from
+
+Two levels, resolved by `resolveContextApiKey()` in `core/mcp.ts`:
+
+```
+workspace.contextApiKey          collected in the New workspace dialog; wins
+  ↓ falls back to
+CONTEXT_DEV_API_KEY  (.env)      the default that makes this a DEFAULT
+  ↓ neither set
+pane runs with no context.dev    supported state, logged once at startup
+```
+
+Per-workspace rather than one global key so two workspaces can bill to two
+accounts. Blank is normalised to `undefined` at the point of creation — an empty
+string would otherwise reach the spawn as a present-but-useless key and shadow
+the `.env` default, producing an opaque auth error at the first tool call.
+
+**The key never crosses the websocket.** The browser is told only whether a
+default exists (`env.hasDefaultContextKey`), which is just enough for the dialog
+to say what leaving the field blank will do.
+
+### How it reaches the agent
+
+```
+UI: workspace.contextApiKey
+  → pane:spawn { contextApiKey }
+  → PaneSupervisor.spawn
+  → buildPaneConfigDir()                     server/devin-config-dir.ts
+      writes <paneDir>/xdg/devin/mcp_config.json   (0600)
+  → ptySpawn(env: { XDG_CONFIG_HOME: <paneDir>/xdg })
+```
+
+`--config` still carries the hooks; `XDG_CONFIG_HOME` carries the MCP servers.
+**They are two different mechanisms and are not interchangeable — §3 trap 9 has
+the probes that establish why.**
+
+The pane's config dir is a *shadow* of `~/.config`: every entry symlinked
+through, with a real `devin/` whose `config.json` and `mcp_config.json` we
+generate. This matters because `XDG_CONFIG_HOME` is not Devin's variable — a
+bare redirect would also move `git`, `gh` and anything else the agent shells out
+to. Symlinks (not copies) mean a skill the user adds mid-session is picked up
+live. The dir is rebuilt from scratch on each spawn; stale links to deleted
+config would be a silent, confusing failure.
+
+Credentials live under `XDG_DATA_HOME`, which is untouched — this is why a
+redirected pane stays signed in.
+
+### The entry shape
+
+Written exactly as issued, the `.mcp.json` form:
+
+```json
+{ "mcpServers": { "context": {
+    "type": "http",
+    "url": "https://mcp.context.dev/mcp",
+    "headers": { "Authorization": "Bearer ctxt_secret_…" } } } }
+```
+
+Both `{"type":"http"}` and Devin's native `{"transport":"http"}` parse — verified
+with `devin mcp get context`. The key goes in a header, never in the URL:
+context.dev's own server instructions say so, and a URL is logged in far more
+places than a header is.
+
+`composeMcpConfig()` merges non-destructively and **refuses to overwrite an entry
+it did not write** — specifically, one with no `Authorization` header, which is
+what a user who ran `devin mcp login context` would have. Clobbering that would
+silently swap a working OAuth credential for an API key.
+
+### Verified end-to-end
+
+Against real Devin CLI `3000.6.7`, driving the actual `buildPaneConfigDir` code
+path rather than a hand-built fixture:
+
+```
+devin --config <paneDir>/xdg/devin/config.json   (XDG_CONFIG_HOME=<paneDir>/xdg)
+  → "Logged in as naikashok08@gmail.com"          auth survives the redirect
+  → "two MCP servers available: context and playwright"
+  → context web-search tool call SUCCEEDED, no auth error
+```
+
+`playwright` in that list comes from Devin's Claude Code import (`~/.claude.json`),
+which is home-based and unaffected by the redirect — a useful signal that the
+shadow is not hiding the user's own config.
+
+---
+
+## 11. Session handoff — 2026-08-30
+
+### What this session did
+
+1. **context.dev as the default MCP server** (§10). New: `core/mcp.ts`,
+   `server/devin-config-dir.ts`, `server/env.ts`, plus a `contextApiKey` field on
+   `Workspace`, on `pane:spawn`, and in the New workspace dialog.
+2. **Retheme to the Instrument design system.** `DESIGN.md` at the repo root is
+   now authoritative for every colour, type step, spacing and motion value. The
+   eight Dell catalog tints are gone; panes are told apart by the surface system
+   and a brass left edge on `:focus-within`.
+3. **Fixed the trace panel dumping raw JSON-RPC** (§3 trap 10).
+
+94 tests pass, typecheck clean, `vite build` succeeds.
+
+### Secrets — read before you commit anything
+
+- **`.env` exists locally and holds a real context.dev key.** It is gitignored
+  (`git check-ignore .env` confirms). **Never commit it, never paste the key into
+  a file that is tracked, never echo it into a commit message or a PR body.**
+- `.env.example` carries the placeholder and the explanation. That one is tracked.
+- Generated `mcp_config.json` files under `~/.devin-agent-tmux/panes/*/xdg/` also
+  contain the key, at `0600`. They are outside the repo.
+
+### ⚠ Open risk: this repo's own `.mcp.json` shadows the feature
+
+`.mcp.json` at the repo root is **tracked** and contains:
+
+```json
+"headers": { "Authorization": "Bearer " }     ← empty key
+```
+
+It is Claude Code's config, but **Devin imports `.mcp.json` as MCP servers** (see
+Devin's `read_config_from` docs — Claude Code sources include `.mcp.json`). If
+that import lands at project scope, it outranks the user-scope entry we generate,
+and a pane whose cwd is *this repo* would get a `context` server with an empty
+Bearer token — ours silently overridden by a broken one.
+
+This is **unverified either way**. It does not affect panes in other directories,
+which is every real use of the app, which is why it was recorded rather than
+guessed at. To settle it:
+
+```bash
+cd /Users/ashoknaik/devin-agent-tmux
+XDG_CONFIG_HOME=~/.devin-agent-tmux/panes/<somePaneId>/xdg devin mcp get context
+# then check whether the Authorization header shown is ours or the empty one
+```
+
+If it does override, the fix is **not** to put the real key in `.mcp.json` — that
+file is tracked and the repo is shared. Either delete the `context` block from
+`.mcp.json` (Claude Code can get context.dev from `~/.claude.json` instead), or
+set `read_config_from.claude: false` in the generated per-pane `config.json`.
+
+### State of the tree
+
+Everything described above is committed except this HANDOFF edit. Note that
+`HANDOFF.md` was truncated to 9 lines in the working tree at one point during the
+session — most likely two writers racing on it — and was restored with
+`git checkout -- HANDOFF.md`. If a doc looks impossibly short, check `git show
+HEAD:<file>` before assuming the content was never written.
+
+### Things deliberately NOT done
+
+- No commit of `.env`, and no key in any tracked file.
+- The global `~/.config/devin/mcp_config.json` is **not** written to. An earlier
+  draft did register context.dev there; it was removed when per-workspace keys
+  made per-pane config necessary. The app should not change sessions it did not
+  start.
+- The React layer still has no automated test. It was rendered and eyeballed,
+  not asserted on.
