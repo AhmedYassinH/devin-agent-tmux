@@ -30,6 +30,7 @@ export class Backend {
   private queue: ClientMessage[] = [];
   private commandQueue: QueuedCommand[] = [];
   private commandTimer: number | null = null;
+  private commandInFlight = false;
   private resizeQueue = new Map<string, Extract<ClientMessage, { t: 'pane:resize' }>>();
   private resizeTimer: number | null = null;
   private reconnectTimer: number | null = null;
@@ -195,14 +196,22 @@ export class Backend {
 
   private flushCommands(): void {
     this.commandTimer = null;
-    if (!this.convex || this.commandQueue.length === 0) return;
+    if (!this.convex || this.commandInFlight || this.commandQueue.length === 0) return;
     const commands = this.commandQueue;
     this.commandQueue = [];
+    this.commandInFlight = true;
+    let retryDelay = 16;
     void this.convex
       .mutation('mux:enqueueCommands', { profileKey: this.profileKey, commands })
       .catch(() => {
+        retryDelay = 500;
         this.commandQueue = [...commands, ...this.commandQueue];
-        if (this.commandTimer === null) this.commandTimer = window.setTimeout(() => this.flushCommands(), 500);
+      })
+      .finally(() => {
+        this.commandInFlight = false;
+        if (this.commandQueue.length > 0 && this.commandTimer === null) {
+          this.commandTimer = window.setTimeout(() => this.flushCommands(), retryDelay);
+        }
       });
   }
 

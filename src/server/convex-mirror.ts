@@ -35,6 +35,7 @@ export class ConvexMirror {
   private queued: AppState | null = null;
   private output = new Map<string, string>();
   private outputTimers = new Map<string, NodeJS.Timeout>();
+  private outputInFlight = new Set<string>();
   private processing = new Set<string>();
   private commandTail = Promise.resolve();
   private warned = false;
@@ -137,18 +138,44 @@ export class ConvexMirror {
 
   private publishOutput(paneId: string, data: string): void {
     this.output.set(paneId, `${this.output.get(paneId) ?? ''}${data}`);
-    if (this.outputTimers.has(paneId)) return;
-    const timer = setTimeout(() => this.flushOutput(paneId), 25);
+    this.scheduleOutput(paneId, 25);
+  }
+
+  private scheduleOutput(paneId: string, delay: number): void {
+    if (this.outputInFlight.has(paneId) || this.outputTimers.has(paneId)) return;
+    const timer = setTimeout(() => this.flushOutput(paneId), delay);
     timer.unref?.();
     this.outputTimers.set(paneId, timer);
   }
 
   private flushOutput(paneId: string): void {
     this.outputTimers.delete(paneId);
-    const data = this.output.get(paneId);
-    this.output.delete(paneId);
-    if (!data) return;
-    this.fire('mux:appendOutput', { profileKey: this.profileKey, paneId, data });
+    if (!this.client || this.outputInFlight.has(paneId)) return;
+    const queued = this.output.get(paneId);
+    if (!queued) return;
+    const data = queued.slice(0, 64_000);
+    const remaining = queued.slice(data.length);
+    if (remaining) this.output.set(paneId, remaining);
+    else this.output.delete(paneId);
+    this.outputInFlight.add(paneId);
+    let retryDelay = 0;
+    void this.client
+      .mutation('mux:appendOutput', { profileKey: this.profileKey, paneId, data })
+      .then(
+        () => {
+          this.warned = false;
+        },
+        (err: Error) => {
+          retryDelay = 500;
+          this.output.set(paneId, `${data}${this.output.get(paneId) ?? ''}`);
+          if (!this.warned) console.warn('[convex] realtime mutation failed:', err.message);
+          this.warned = true;
+        },
+      )
+      .finally(() => {
+        this.outputInFlight.delete(paneId);
+        if (this.output.has(paneId)) this.scheduleOutput(paneId, retryDelay);
+      });
   }
 
   private fire(name: string, args: unknown): void {
