@@ -52,6 +52,14 @@ export interface SessionConfig {
   prompt?: string;
   /** When set, the pane launched with `devin -r <id>` instead of fresh. */
   resumeSessionId?: string;
+  /**
+   * Launch a plain shell instead of `devin` — the escape-hatch pane.
+   *
+   * Persisted so that recovering a pane after an agent/server restart (see the
+   * server's pane:ensure path) relaunches it as the same kind it was, rather
+   * than turning a shell into a devin session.
+   */
+  shellOnly?: boolean;
   /** Absolute path of this pane's `--export` transcript (context-health input). */
   exportPath?: string;
   createdAt: number;

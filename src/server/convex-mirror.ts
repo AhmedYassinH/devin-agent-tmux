@@ -6,23 +6,56 @@
  * unreachable, unconfigured, or slow, the app keeps working and simply stops
  * syncing — which is the entire reason the file store remained the truth.
  *
- * Pushes are debounced and last-write-wins per workspace. Two hosts editing the
- * same workspace concurrently is not a case this resolves; it is a case it does
- * not corrupt, because the loser can always re-push from its own local tree.
+ * Two jobs, both optional and additive:
+ *
+ *   1. State mirror — `push` debounces and last-write-wins per workspace, so a
+ *      remote browser can read what a machine has open (workspaces, sessions and
+ *      the Kanban board). Nothing here ever writes back down.
+ *   2. Realtime relay — when Convex is configured, terminal output, status and
+ *      lifecycle events are `publish`ed to Convex, and browser commands are read
+ *      back via `start`, so a browser that is NOT on this machine can drive the
+ *      panes through Convex instead of the local WebSocket.
+ *
+ * When no CONVEX_URL is set, both jobs no-op and the app runs exactly as before
+ * over the local WebSocket.
  */
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import type { AppState } from '../core/models.js';
+import type { ClientMessage, ServerMessage } from './protocol.js';
 
-type ConvexClientLike = { mutation: (name: unknown, args: unknown) => Promise<unknown> };
+type CommandRow = { commandId: string; message: string };
+type ConvexClientLike = {
+  mutation: (name: unknown, args: unknown) => Promise<unknown>;
+  onUpdate: (
+    name: unknown,
+    args: unknown,
+    callback: (value: CommandRow[]) => void,
+    onError?: (error: Error) => void,
+  ) => () => void;
+  close: () => Promise<void>;
+};
 
 export class ConvexMirror {
   private client: ConvexClientLike | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private heartbeat: NodeJS.Timeout | null = null;
+  private unsubscribe: (() => void) | null = null;
   private queued: AppState | null = null;
+  private output = new Map<string, string>();
+  private outputTimers = new Map<string, NodeJS.Timeout>();
+  private outputInFlight = new Set<string>();
+  private processing = new Set<string>();
+  private commandTail = Promise.resolve();
   private warned = false;
+  private readonly profileKey = process.env.CONVEX_PROFILE || 'default';
+  private readonly agentId = randomUUID();
 
   /**
    * Dynamic import so a missing/unconfigured Convex never breaks server startup —
-   * offline is a supported mode, not a degraded one.
+   * offline is a supported mode, not a degraded one. Uses the realtime
+   * `ConvexClient` (not the HTTP client) so the server can subscribe to the
+   * command queue a remote browser writes into.
    */
   static async create(url: string | undefined): Promise<ConvexMirror> {
     const mirror = new ConvexMirror();
@@ -31,11 +64,11 @@ export class ConvexMirror {
       return mirror;
     }
     try {
-      const { ConvexHttpClient } = (await import('convex/browser')) as {
-        ConvexHttpClient: new (url: string) => ConvexClientLike;
+      const { ConvexClient } = (await import('convex/browser')) as {
+        ConvexClient: new (url: string) => ConvexClientLike;
       };
-      mirror.client = new ConvexHttpClient(url);
-      console.log(`[convex] mirroring to ${url}`);
+      mirror.client = new ConvexClient(url);
+      console.log(`[convex] realtime agent connected to ${url} as ${mirror.profileKey}`);
     } catch (err) {
       console.warn('[convex] client unavailable; running local-only:', (err as Error).message);
     }
@@ -44,6 +77,136 @@ export class ConvexMirror {
 
   get enabled(): boolean {
     return this.client !== null;
+  }
+
+  /**
+   * Begin relaying: publish machine presence on a heartbeat, and subscribe to
+   * the command queue so a remote browser's input/spawn/resize/kill reach the
+   * PTYs. `onCommand` is the server's own message handler.
+   */
+  start(onCommand: (message: ClientMessage) => Promise<void>): void {
+    if (!this.client) return;
+    const updateStatus = () =>
+      this.fire('mux:updateMachineStatus', {
+        profileKey: this.profileKey,
+        home: homedir(),
+        cwd: process.cwd(),
+        agentId: this.agentId,
+        hasDefaultContextKey: Boolean(process.env.CONTEXT_DEV_API_KEY?.trim()),
+      });
+    updateStatus();
+    this.heartbeat = setInterval(updateStatus, 10_000);
+    this.heartbeat.unref?.();
+    this.unsubscribe = this.client.onUpdate(
+      'mux:pendingCommands',
+      { profileKey: this.profileKey },
+      (rows) => this.consume(rows, onCommand),
+      (error) => console.warn('[convex] command subscription failed:', error.message),
+    );
+  }
+
+  /** Relay a server→browser message to Convex. Terminal bytes are batched. */
+  publish(message: ServerMessage): void {
+    if (!this.client) return;
+    if (message.t === 'pane:data') {
+      this.publishOutput(message.paneId, message.data);
+      return;
+    }
+    this.fire('mux:publishEvent', {
+      profileKey: this.profileKey,
+      eventId: randomUUID(),
+      message: JSON.stringify(message),
+      createdAt: Date.now(),
+    });
+  }
+
+  close(): void {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.unsubscribe?.();
+    for (const timer of this.outputTimers.values()) clearTimeout(timer);
+    for (const paneId of this.output.keys()) this.flushOutput(paneId);
+    void this.client?.close();
+  }
+
+  private consume(rows: CommandRow[], onCommand: (message: ClientMessage) => Promise<void>): void {
+    const pending = rows.filter((row) => !this.processing.has(row.commandId));
+    if (pending.length === 0) return;
+    for (const row of pending) this.processing.add(row.commandId);
+    this.commandTail = this.commandTail.then(async () => {
+      for (const row of pending) {
+        try {
+          await onCommand(JSON.parse(row.message) as ClientMessage);
+        } catch (err) {
+          console.warn('[convex] command failed:', (err as Error).message);
+        }
+      }
+      try {
+        await this.client?.mutation('mux:acknowledgeCommands', {
+          profileKey: this.profileKey,
+          commandIds: pending.map((row) => row.commandId),
+        });
+      } catch (err) {
+        console.warn('[convex] command acknowledgement failed:', (err as Error).message);
+      } finally {
+        for (const row of pending) this.processing.delete(row.commandId);
+      }
+    });
+  }
+
+  private publishOutput(paneId: string, data: string): void {
+    this.output.set(paneId, `${this.output.get(paneId) ?? ''}${data}`);
+    this.scheduleOutput(paneId, 25);
+  }
+
+  private scheduleOutput(paneId: string, delay: number): void {
+    if (this.outputInFlight.has(paneId) || this.outputTimers.has(paneId)) return;
+    const timer = setTimeout(() => this.flushOutput(paneId), delay);
+    timer.unref?.();
+    this.outputTimers.set(paneId, timer);
+  }
+
+  private flushOutput(paneId: string): void {
+    this.outputTimers.delete(paneId);
+    if (!this.client || this.outputInFlight.has(paneId)) return;
+    const queued = this.output.get(paneId);
+    if (!queued) return;
+    const data = queued.slice(0, 64_000);
+    const remaining = queued.slice(data.length);
+    if (remaining) this.output.set(paneId, remaining);
+    else this.output.delete(paneId);
+    this.outputInFlight.add(paneId);
+    let retryDelay = 0;
+    void this.client
+      .mutation('mux:appendOutput', { profileKey: this.profileKey, paneId, data })
+      .then(
+        () => {
+          this.warned = false;
+        },
+        (err: Error) => {
+          retryDelay = 500;
+          this.output.set(paneId, `${data}${this.output.get(paneId) ?? ''}`);
+          if (!this.warned) console.warn('[convex] realtime mutation failed:', err.message);
+          this.warned = true;
+        },
+      )
+      .finally(() => {
+        this.outputInFlight.delete(paneId);
+        if (this.output.has(paneId)) this.scheduleOutput(paneId, retryDelay);
+      });
+  }
+
+  private fire(name: string, args: unknown): void {
+    if (!this.client) return;
+    void this.client.mutation(name, args).then(
+      () => {
+        this.warned = false;
+      },
+      (err: Error) => {
+        if (!this.warned) console.warn('[convex] realtime mutation failed:', err.message);
+        this.warned = true;
+      },
+    );
   }
 
   /** Queue a push. Coalesces bursts (a divider drag emits many state updates). */
@@ -78,12 +241,14 @@ export class ConvexMirror {
             cwd: ws.cwd,
             view: ws.view,
             updatedAt: ws.updatedAt,
-            // Trees and pane maps are stored opaquely: their shape belongs to
-            // core/models.ts, and mirroring it into a Convex schema would mean
-            // migrating two stores every time a layout gains a field.
+            // Trees, pane maps and cards are stored opaquely: their shape belongs
+            // to core/models.ts, and mirroring it into a Convex schema would mean
+            // migrating two stores every time one gains a field.
             layout: JSON.stringify(ws.layout),
             sessions: JSON.stringify(ws.sessions),
             sessionOrder: ws.sessionOrder,
+            cards: JSON.stringify(ws.cards ?? {}),
+            cardOrder: ws.cardOrder ?? [],
           })),
       });
       this.warned = false;

@@ -1,15 +1,38 @@
 /**
- * Browser-side transport. One websocket to the local server, with typed
- * send/subscribe and request/response helpers for the two ACP-backed calls.
+ * Browser-side transport.
  *
- * Reconnects on drop: `npm run dev` restarts the server on edit, and a UI that
- * needed a manual refresh after every server reload would be unusable.
+ * Two modes, chosen once at construction and invisible to the rest of the UI:
+ *
+ *   - Local (default): one WebSocket to the machine's server, exactly as before.
+ *   - Convex realtime: when VITE_CONVEX_URL is set, the browser talks to Convex
+ *     instead — reading state/terminal/status from subscriptions and writing
+ *     input/spawn/resize/kill into a command queue the machine agent drains.
+ *     This is what lets a browser that is NOT on the machine drive the panes.
+ *
+ * Either way the public surface is identical: `send`, `subscribe`, and the two
+ * request/response helpers. The rest of the app never learns which is in use.
+ *
+ * The WebSocket path reconnects on drop: `npm run dev` restarts the server on
+ * edit, and a UI that needed a manual refresh after every reload would be
+ * unusable.
  */
+import { ConvexClient } from 'convex/browser';
 import type { ClientMessage, ServerMessage } from '../server/protocol.js';
 import type { AcpErrorKind, AcpSessionSummary } from '../core/acp.js';
+import type { AppState, Card, Workspace } from '../core/models.js';
 import type { Trace } from '../core/trace.js';
 
 type Listener = (msg: ServerMessage) => void;
+type ConvexClientLike = {
+  mutation: (name: unknown, args: unknown) => Promise<unknown>;
+  onUpdate: (
+    name: unknown,
+    args: unknown,
+    callback: (value: any) => void,
+    onError?: (error: Error) => void,
+  ) => () => void;
+};
+type QueuedCommand = { commandId: string; message: string; createdAt: number };
 
 /**
  * A request that failed, carrying the server's classification.
@@ -28,13 +51,101 @@ export class BackendError extends Error {
 
 export class Backend {
   private ws: WebSocket | null = null;
+  private convex: ConvexClientLike | null = null;
   private listeners = new Set<Listener>();
   private queue: ClientMessage[] = [];
+  private commandQueue: QueuedCommand[] = [];
+  private commandTimer: number | null = null;
+  private commandInFlight = false;
   private reconnectTimer: number | null = null;
+  private latestState: ServerMessage | null = null;
+  private latestEnv: ServerMessage | null = null;
+  private latestRuntime = new Map<string, ServerMessage>();
+  private snapshots = new Map<string, { snapshot: string; outputVersion: number }>();
+  private seenEvents = new Set<string>();
+  private readonly profileKey = import.meta.env.VITE_CONVEX_PROFILE || 'default';
 
   constructor(private url = `ws://${location.hostname}:5173/pty`) {
-    this.connect();
+    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    if (convexUrl) this.connectConvex(convexUrl);
+    else this.connect();
   }
+
+  // ---- Convex realtime path -------------------------------------------------
+
+  private connectConvex(url: string) {
+    this.convex = new ConvexClient(url) as unknown as ConvexClientLike;
+    const args = { profileKey: this.profileKey };
+
+    this.convex.onUpdate('mux:pullState', args, (value) => {
+      if (!value?.profile) return;
+      const workspaces: Record<string, Workspace> = {};
+      for (const row of value.workspaces as any[]) {
+        try {
+          const cards = row.cards ? (JSON.parse(row.cards) as Record<string, Card>) : {};
+          workspaces[row.workspaceId] = {
+            id: row.workspaceId,
+            name: row.name,
+            cwd: row.cwd,
+            view: row.view,
+            sessionOrder: row.sessionOrder,
+            layout: JSON.parse(row.layout),
+            sessions: JSON.parse(row.sessions),
+            cards,
+            cardOrder: (row.cardOrder ?? Object.keys(cards)).filter((id: string) => Boolean(cards[id])),
+            updatedAt: row.updatedAt,
+          };
+        } catch {
+          continue;
+        }
+      }
+      const state: AppState = {
+        storeVersion: value.profile.storeVersion,
+        activeWorkspaceId: value.profile.activeWorkspaceId ?? null,
+        workspaceOrder: value.profile.workspaceOrder.filter((id: string) => Boolean(workspaces[id])),
+        workspaces,
+      };
+      this.emit({ t: 'state', state });
+    });
+
+    this.convex.onUpdate('mux:getMachineStatus', args, (value) => {
+      if (value) {
+        this.emit({
+          t: 'env',
+          home: value.home,
+          cwd: value.cwd,
+          hasDefaultContextKey: value.hasDefaultContextKey ?? false,
+        });
+      }
+    });
+
+    // Terminal output. A pane seen for the first time delivers its whole
+    // backlog via pane:snapshot (so the terminal's attach logic completes);
+    // afterwards only the newest chunk is streamed as pane:data.
+    this.convex.onUpdate('mux:terminalState', args, (rows) => {
+      for (const row of rows as any[]) {
+        const previous = this.snapshots.get(row.paneId);
+        this.snapshots.set(row.paneId, { snapshot: row.snapshot, outputVersion: row.outputVersion });
+        if (previous && row.outputVersion > previous.outputVersion && row.lastChunk) {
+          this.emit({ t: 'pane:data', paneId: row.paneId, data: row.lastChunk });
+        }
+      }
+    });
+
+    this.convex.onUpdate('mux:realtimeEvents', args, (rows) => {
+      for (const row of rows as any[]) {
+        if (this.seenEvents.has(row.eventId)) continue;
+        this.seenEvents.add(row.eventId);
+        try {
+          this.emit(JSON.parse(row.message) as ServerMessage);
+        } catch {
+          continue;
+        }
+      }
+    });
+  }
+
+  // ---- local WebSocket path -------------------------------------------------
 
   private connect() {
     const ws = new WebSocket(this.url);
@@ -55,7 +166,7 @@ export class Backend {
       } catch {
         return;
       }
-      for (const listener of this.listeners) listener(msg);
+      this.emit(msg);
     };
 
     ws.onclose = () => {
@@ -70,13 +181,85 @@ export class Backend {
     ws.onerror = () => ws.close();
   }
 
+  private emit(msg: ServerMessage): void {
+    // Cache the messages a late subscriber needs to catch up. Terminal bytes and
+    // snapshots are one-shot streams and are never cached.
+    if (msg.t === 'state') this.latestState = msg;
+    else if (msg.t === 'env') this.latestEnv = msg;
+    else if ('paneId' in msg && msg.t !== 'pane:data' && msg.t !== 'pane:snapshot') {
+      this.latestRuntime.set(`${msg.t}:${msg.paneId}`, msg);
+    }
+    for (const listener of this.listeners) listener(msg);
+  }
+
   send(msg: ClientMessage) {
+    if (this.convex) {
+      // A terminal that just mounted wants its backlog: answer locally from the
+      // snapshot the terminalState subscription already holds, matching the
+      // WebSocket server's pane:attach reply.
+      if (msg.t === 'pane:attach') {
+        const snap = this.snapshots.get(msg.paneId);
+        this.emit({ t: 'pane:snapshot', paneId: msg.paneId, data: snap?.snapshot ?? '' });
+        return;
+      }
+      this.enqueue(msg);
+      return;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
     else this.queue.push(msg);
   }
 
+  private enqueue(msg: ClientMessage): void {
+    // Coalesce keystroke and resize bursts so the command queue stays small.
+    const last = this.commandQueue.at(-1);
+    if (last && (msg.t === 'pane:input' || msg.t === 'pane:resize')) {
+      const previous = JSON.parse(last.message) as ClientMessage;
+      if (msg.t === 'pane:input' && previous.t === 'pane:input' && previous.paneId === msg.paneId) {
+        last.message = JSON.stringify({ ...msg, data: previous.data + msg.data });
+        return;
+      }
+      if (msg.t === 'pane:resize' && previous.t === 'pane:resize' && previous.paneId === msg.paneId) {
+        last.message = JSON.stringify(msg);
+        return;
+      }
+    }
+    this.commandQueue.push({
+      commandId: crypto.randomUUID(),
+      message: JSON.stringify(msg),
+      createdAt: Date.now(),
+    });
+    if (this.commandTimer === null) this.commandTimer = window.setTimeout(() => this.flushCommands(), 16);
+  }
+
+  private flushCommands(): void {
+    this.commandTimer = null;
+    if (!this.convex || this.commandInFlight || this.commandQueue.length === 0) return;
+    const commands = this.commandQueue;
+    this.commandQueue = [];
+    this.commandInFlight = true;
+    let retryDelay = 16;
+    void this.convex
+      .mutation('mux:enqueueCommands', { profileKey: this.profileKey, commands })
+      .catch(() => {
+        retryDelay = 500;
+        this.commandQueue = [...commands, ...this.commandQueue];
+      })
+      .finally(() => {
+        this.commandInFlight = false;
+        if (this.commandQueue.length > 0 && this.commandTimer === null) {
+          this.commandTimer = window.setTimeout(() => this.flushCommands(), retryDelay);
+        }
+      });
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
+    // Catch a late subscriber up to the current world without waiting for the
+    // next update — important on the Convex path, where subscriptions fire once
+    // and then only on change.
+    if (this.latestEnv) listener(this.latestEnv);
+    if (this.latestState) listener(this.latestState);
+    for (const message of this.latestRuntime.values()) listener(message);
     return () => this.listeners.delete(listener);
   }
 

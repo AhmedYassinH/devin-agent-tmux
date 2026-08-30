@@ -79,14 +79,26 @@ export function PaneLauncher({
         </div>
 
         <div className="launcher-actions">
-          <button className="primary" onClick={() => launch(false)}>
-            Run Devin
+          <button
+            className="primary"
+            onClick={() => launch(false)}
+            title="Launch a new Devin agent in this pane"
+          >
+            Start Devin
           </button>
-          <button className="secondary" onClick={onImport}>
+          <button
+            className="secondary"
+            onClick={onImport}
+            title="Reopen one of your past Devin sessions"
+          >
             Resume a session…
           </button>
-          <button className="secondary" onClick={() => launch(true)}>
-            Shell
+          <button
+            className="secondary"
+            onClick={() => launch(true)}
+            title="Open a plain terminal shell instead of Devin"
+          >
+            Open a terminal
           </button>
         </div>
 

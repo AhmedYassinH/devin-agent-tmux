@@ -23,6 +23,12 @@ Ported from a Claude-Code-based multiplexer to Devin, web-first.
 
 - **Parallel agents** — 1 / 1×2 / 1×3 / 2×2 / 2×3 layouts of independent `devin`
   sessions, each its own PTY, with draggable dividers. Grid or tab-strip view.
+- **Kanban board** — a per-workspace alternative to the terminal grid: write
+  tickets, press **Start**, and Devin picks each up with the ticket description as
+  its prompt. Cards flow Backlog → In Progress → Attention → Done automatically as
+  the agent's status changes, and each card opens the live terminal so you can
+  watch and reply without leaving the board. A workspace's kind (terminal vs
+  board) is chosen at creation and fixed for its life.
 - **Real Devin, not a reimplementation** — every pane is the actual `devin` TUI.
   Slash commands, the permission dialog, `/model`, `/compact` all work, because
   we launch the CLI rather than reimplementing its client.
@@ -40,8 +46,10 @@ Ported from a Claude-Code-based multiplexer to Devin, web-first.
   scraping, crawling, structured extraction and document parsing, with no
   per-session setup. The key is per workspace, so two workspaces can bill to two
   accounts, and falls back to one default for everything else.
-- **Persistence** — workspaces, layouts and sessions live in `~/.devin-agent-tmux/`
-  as one JSON file per entity, mirrored to Convex for cross-device sync.
+- **Persistence** — workspaces, layouts, sessions and board tickets live in
+  `~/.devin-agent-tmux/` as one JSON file per entity. Optionally mirrored to Convex
+  for cross-device sync and realtime remote terminals (see below); off by default,
+  local-first always.
 
 ---
 
@@ -147,81 +155,6 @@ faked.
 
 ---
 
-## Judging criteria
-
-The brief asked for something **useful, technically credible, and demonstrable**.
-Each claim below is backed by a measurement in [Verification](#verification),
-not by assertion.
-
-### 🛠 Developer tools
-
-This is a developer tool in the most literal sense: it is where you *run* your
-agents. It composes with Devin instead of wrapping it — panes are the real CLI,
-so nothing about Devin's UX is lost or reimplemented, and the app inherits every
-Devin feature shipped after this was written.
-
-The integration uses Devin's three supported extension points exactly as
-documented: hooks for lifecycle, `--config` for injection, and `devin acp` for
-history. There is **no screen-scraping of the TUI and no coupling to Devin's
-internal SQLite schema** — both were considered and rejected on the record.
-
-### 🤖 AI agents
-
-The unit of work is an agent, not a terminal. The app knows each pane's *agent
-state* (idle / running / **waiting on you** / exited), which agent session it is,
-how full its context window is, and what it did — none of which a plain
-multiplexer like tmux can know, because none of it is on the wire as text.
-
-Running six agents at once is a supervision problem, and the design answers it:
-the attention dot tells you *which* workspace has an agent blocked, so you drive
-N agents by exception rather than by polling panes.
-
-### ⚡ Productivity & workplace automation
-
-The measured bottleneck in multi-agent work is not typing speed, it is (a) idle
-agents you didn't notice were blocked and (b) context exhaustion discovered only
-after the model degrades. Both get a direct signal:
-
-- `waiting` badges + workspace attention dots surface blocked agents immediately.
-- The context badge turns amber at 50% and red at 70% of the model's real window
-  — thresholds taken from context-rot research, where degradation starts well
-  before the limit.
-
-Persistence closes the loop: workspaces, layouts, cwds and session ids survive a
-restart, so a working set of agents is a thing you *keep*, not something you
-rebuild each morning.
-
-### 👥 Collaboration
-
-`~/.devin-agent-tmux/` is one human-readable JSON file per entity — `cat`-able,
-diffable, and reviewable. It mirrors to **Convex**, so a workspace layout is a
-shared object rather than a private dotfile, and the same working set can follow
-you to another machine.
-
-The split is principled: the local file tree stays the source of truth (the app
-works fully offline; a Convex outage costs sync, not your workspaces) and the
-mirror is best-effort by construction — every failure is logged once and
-swallowed.
-
-### 📚 Knowledge management
-
-This is the trace panel's reason to exist. An agent session is an artifact worth
-keeping: what was asked, what was tried, which files changed, what failed. The
-app turns Devin's session store into a browsable, searchable record —
-`session/list` across every project on the machine, `session/load` to replay one
-turn-by-turn with structured diffs and per-tool timings.
-
-Because it reads over ACP, the record is Devin's own — not a lossy copy this app
-maintains and has to keep in sync.
-
-### Demonstrable
-
-Two smoke scripts drive the real thing against real sessions, end to end
-(see [Verification](#verification)). The demo is: open the browser, launch three
-agents on three repos, watch the badges, let one finish, open its trace.
-
----
-
 ## Verification
 
 Measured on this machine against Devin CLI `3000.6.7`. Reproduce with the smoke
@@ -302,13 +235,46 @@ will do. At spawn, the key is written into that pane's own
 > credentials (under `XDG_DATA_HOME`) are untouched, so panes stay signed in.
 > `HANDOFF.md` §3 trap 9 has the probes that establish this.
 
-Optional Convex sync:
+### Optional: Convex realtime sync
+
+Convex is an **additive** layer over the local file store, which stays the source
+of truth. Leave it unset and the app runs exactly as before over the local
+WebSocket, saying so at startup (`[convex] no CONVEX_URL set — running
+local-only`).
 
 ```bash
-npx convex dev       # writes .env.local with CONVEX_URL
+npx convex dev        # provisions a deployment + writes CONVEX_URL to .env.local
 ```
 
-Without it the app runs local-only and says so at startup.
+Then set both keys in `.env` (the browser reads `VITE_*`, the machine agent reads
+the unprefixed ones — normally the same values):
+
+```bash
+VITE_CONVEX_URL=https://<your-deployment>.convex.cloud
+CONVEX_URL=https://<your-deployment>.convex.cloud
+VITE_CONVEX_PROFILE=default     # browser and agent must share this
+CONVEX_PROFILE=default
+```
+
+**What syncs, and what it unlocks.** With Convex configured the machine agent
+mirrors and relays through it, so a browser that is **not on the machine** can
+watch and drive the same panes:
+
+| Convex table | Holds | Direction |
+|---|---|---|
+| `profiles` / `workspaces` | store version, active workspace, order, and each workspace's **sessions and Kanban cards** (opaque JSON, same shape as the local files) | agent → mirror, browser reads |
+| `terminalPanes` | a rolling snapshot + latest chunk of each pane's PTY output | agent → browser (live terminal) |
+| `terminalCommands` | keystrokes, spawns, resizes, kills the browser issues | browser → agent (drained + acked) |
+| `machineStatus` | machine presence + whether a default context.dev key exists | agent → browser |
+| `realtimeEvents` | status / session-id / exit / health and request replies | agent → browser |
+
+The local file tree remains authoritative: pushes are debounced and
+last-write-wins per workspace, every Convex failure is logged once and swallowed,
+and a Convex outage costs sync, not your workspaces. Session **and ticket** data
+live in `~/.devin-agent-tmux` first and are mirrored to Convex second.
+
+> The generated `convex/_generated/` is committed so the server can start before
+> `convex dev` has ever run; it is regenerated whenever you run `convex dev`.
 
 **Try:** pick a layout → **Run Devin** in an empty pane → watch the badge go
 `running`; **Sessions…** → **Resume** an old session, or **Trace** one to read it
@@ -349,12 +315,14 @@ src/server/   the local host
   panes.ts           node-pty supervisor, per-pane config, OSC extraction
   acp-client.ts      short-lived `devin acp` JSON-RPC subprocess
   health.ts          polls each pane's --export transcript
-  store.ts           ~/.devin-agent-tmux, atomic + diffed writes
-  convex-mirror.ts   best-effort sync
+  store.ts           ~/.devin-agent-tmux, atomic + diffed writes (workspaces, sessions, cards)
+  convex-mirror.ts   best-effort state mirror + realtime relay (terminal, commands, events)
   protocol.ts        the ws message types, shared with the browser
 
 src/ui/       React + xterm.js
-convex/       mirror schema + push/pull
+  board · CardDialog · CardDetail   the Kanban board (a per-workspace view)
+  backend.ts         one transport, two modes: local WebSocket or Convex realtime
+convex/       schema + mux functions (pushState/pullState, terminal I/O, commands, events)
 scripts/      node-pty fix, two smoke tests
 ```
 

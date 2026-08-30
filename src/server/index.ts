@@ -32,8 +32,12 @@ const PORT = Number(process.env.PORT || 5177);
 
 const store = new FileStore();
 const clients = new Set<WebSocket>();
+let mirror: ConvexMirror | null = null;
 
 function broadcast(msg: ServerMessage) {
+  // Relay to Convex too (no-op unless configured), so a remote browser sees the
+  // same terminal output, status and lifecycle events as a local one.
+  mirror?.publish(msg);
   const payload = JSON.stringify(msg);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) ws.send(payload);
@@ -61,17 +65,27 @@ const supervisor = new PaneSupervisor(store, {
 const health = new HealthWatcher((paneId, h) => broadcast({ t: 'pane:health', paneId, health: h }));
 health.start();
 
-const mirror = await ConvexMirror.create(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
+mirror = await ConvexMirror.create(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
 
-async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
+/**
+ * Handle one client message. `send` is the reply channel for THIS caller — a
+ * WebSocket's own socket for a local browser, or `mirror.publish` for a command
+ * that arrived over Convex from a remote browser. `source` is set only for the
+ * WebSocket path, so the state echo can skip the sender.
+ */
+async function handle(
+  send: (message: ServerMessage) => void,
+  msg: ClientMessage,
+  source?: WebSocket,
+): Promise<void> {
   switch (msg.t) {
     case 'state:save': {
       store.save(msg.state);
-      mirror.push(msg.state);
+      mirror?.push(msg.state);
       // Echo to OTHER clients so two open tabs converge; echoing to the sender
       // would fight its own local edits.
       for (const peer of clients) {
-        if (peer !== ws && peer.readyState === peer.OPEN) {
+        if (peer !== source && peer.readyState === peer.OPEN) {
           peer.send(JSON.stringify({ t: 'state', state: msg.state } satisfies ServerMessage));
         }
       }
@@ -107,7 +121,7 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
       // needs the backlog to repaint. Always reply — even with empty data — so
       // the client can stop queuing live output and start writing it directly.
       const data = supervisor.snapshot(msg.paneId) ?? '';
-      ws.send(JSON.stringify({ t: 'pane:snapshot', paneId: msg.paneId, data } satisfies ServerMessage));
+      send({ t: 'pane:snapshot', paneId: msg.paneId, data });
       break;
     }
 
@@ -123,9 +137,9 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
     case 'sessions:list': {
       try {
         const sessions = await listSessions(msg.cwd);
-        ws.send(JSON.stringify({ t: 'sessions:result', reqId: msg.reqId, sessions } satisfies ServerMessage));
+        send({ t: 'sessions:result', reqId: msg.reqId, sessions });
       } catch (err) {
-        ws.send(JSON.stringify({ t: 'sessions:result', reqId: msg.reqId, error: (err as Error).message } satisfies ServerMessage));
+        send({ t: 'sessions:result', reqId: msg.reqId, error: (err as Error).message });
       }
       break;
     }
@@ -134,26 +148,29 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
       try {
         const updates = await loadSession(msg.sessionId, msg.cwd);
         const trace = buildTrace(msg.sessionId, updates);
-        ws.send(JSON.stringify({ t: 'trace:result', reqId: msg.reqId, trace } satisfies ServerMessage));
+        send({ t: 'trace:result', reqId: msg.reqId, trace });
       } catch (err) {
-        ws.send(
-          JSON.stringify({
-            t: 'trace:result',
-            reqId: msg.reqId,
-            error: (err as Error).message,
-            errorKind: err instanceof AcpRequestError ? err.kind : 'unknown',
-          } satisfies ServerMessage),
-        );
+        send({
+          t: 'trace:result',
+          reqId: msg.reqId,
+          error: (err as Error).message,
+          errorKind: err instanceof AcpRequestError ? err.kind : 'unknown',
+        });
       }
       break;
     }
   }
 }
 
+// Push the current tree once at boot, then relay: browser commands over Convex
+// are routed into the same handler, replying back over Convex.
+mirror.push(store.load());
+mirror.start((message) => handle((response) => mirror?.publish(response), message));
+
 const http = createServer((req, res) => {
   if (req.url === '/api/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, profile: store.root, convex: mirror.enabled }));
+    res.end(JSON.stringify({ ok: true, profile: store.root, convex: mirror?.enabled ?? false }));
     return;
   }
   res.writeHead(404).end();
@@ -181,7 +198,9 @@ wss.on('connection', (ws) => {
     } catch {
       return;
     }
-    void handle(ws, msg).catch((err) => console.error('[server]', err));
+    void handle((message) => ws.send(JSON.stringify(message)), msg, ws).catch((err) =>
+      console.error('[server]', err),
+    );
   });
 
   ws.on('close', () => clients.delete(ws));
@@ -198,6 +217,7 @@ http.listen(PORT, '127.0.0.1', () => {
 function shutdown() {
   supervisor.killAll();
   health.stop();
+  mirror?.close();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
