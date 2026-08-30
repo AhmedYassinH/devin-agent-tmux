@@ -5,6 +5,14 @@ multiplexer: real `devin` TUIs in resizable terminal panes, with live status
 badges, session import/resume, and a turn-by-turn trace of what each agent
 actually did — read over Devin's own ACP protocol.
 
+**Live app: <https://devin-agent-tmux-client.onrender.com/>**
+
+> The hosted client is the browser front end. Because agents run on *your*
+> machine, point it at a local server (`npm run dev`) or a Convex deployment
+> (`VITE_CONVEX_URL`, see [Optional: Convex realtime sync](#optional-convex-realtime-sync))
+> — the site is a view onto a machine that has `devin` installed, not a place
+> your agents run.
+
 Ported from a Claude-Code-based multiplexer to Devin, web-first.
 
 ```
@@ -202,7 +210,9 @@ npm install          # postinstall fixes node-pty's spawn-helper exec bit
 npm run dev          # ws/pty server + Vite, together
 ```
 
-Open http://localhost:5173.
+Open http://localhost:5173 — or use the hosted client at
+<https://devin-agent-tmux-client.onrender.com/> pointed at your machine (via a
+Convex deployment; see below).
 
 **Requirements:** Node ≥ 20, a C toolchain for `node-pty`, and `devin` on your
 `PATH` (`devin auth login` done once).

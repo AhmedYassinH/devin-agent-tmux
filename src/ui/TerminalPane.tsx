@@ -44,7 +44,6 @@ export function TerminalPane({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    fit.fit();
     termRef.current = term;
 
     // Swallow OSC color *queries* (`ESC]10;?`, `]11;?`, `]12;?`) so xterm never
@@ -53,8 +52,8 @@ export function TerminalPane({
     // they arrive after devin has finished starting and get read as prompt input
     // — the `10;rgb:a6a6/b2b2/c0c0…` garbage. The pane is our themed surface
     // (theme.ts), so a color report is not needed; a non-`?` payload is a real
-    // color *set* and is left to xterm's default handler. This fixes both fresh
-    // panes and snapshot replay, where the query sits in the backlog too.
+    // color *set* and is left to xterm's default handler. Because these run for
+    // replayed backlog too, the snapshot can't re-trigger a reply either.
     for (const ident of [10, 11, 12]) {
       term.parser.registerOscHandler(ident, (data) => data === '?');
     }
@@ -69,63 +68,71 @@ export function TerminalPane({
       term.parser.registerCsiHandler(id, () => true);
     }
 
-    // Belt and braces: also gate onData while a snapshot is being replayed, so
-    // any OTHER report the backlog might trigger (Device Attributes, cursor
-    // position) is not re-answered into devin's prompt.
-    let replaying = false;
-    term.onData((data) => {
-      if (replaying) return;
-      backend.send({ t: 'pane:input', paneId, data });
-    });
+    term.onData((data) => backend.send({ t: 'pane:input', paneId, data }));
 
-    // The PTY this terminal points at has usually been running before this
-    // xterm existed — we mount fresh on a workspace switch, a grid re-render, or
-    // a page reload. `pane:attach` asks the server to replay the pane's recent
-    // output so we repaint instead of coming up blank. Until that snapshot lands
-    // we queue live bytes and flush them after it, so the older snapshot can
-    // never be written on top of newer live output.
+    // Nothing is written to xterm until it has been fit at least once: calling
+    // fit() — or writing — before the renderer has real dimensions throws
+    // "Cannot read properties of undefined (reading 'dimensions')", and a pane
+    // that mounts hidden (the tab strip) or before layout has flushed has zero
+    // size. So output queues in `pending` and is flushed once `ready`. `attached`
+    // is the separate attach handshake: pane:data that arrives before the
+    // backlog snapshot is held so the older snapshot can't land on newer bytes.
+    let disposed = false;
+    let ready = false;
     let attached = false;
     const pending: string[] = [];
 
-    const flushPending = () => {
+    const flush = () => {
+      if (!ready || !attached || disposed) return;
       for (const chunk of pending) term.write(chunk);
       pending.length = 0;
     };
 
+    // First successful fit: needs the renderer up (next frame) and a sized host.
+    const tryReady = () => {
+      if (ready || disposed) return;
+      if (host.clientWidth === 0 || host.clientHeight === 0) return;
+      try {
+        fit.fit();
+      } catch {
+        return; // renderer not ready yet; ResizeObserver will retry
+      }
+      ready = true;
+      backend.send({ t: 'pane:resize', paneId, cols: term.cols, rows: term.rows });
+      onReady?.(term.cols, term.rows);
+      flush();
+    };
+    requestAnimationFrame(tryReady);
+
     const off = backend.subscribe((msg) => {
       if (msg.t === 'pane:snapshot' && msg.paneId === paneId && !attached) {
         attached = true;
-        if (msg.data) {
-          // Suppress replies for the whole snapshot parse, then re-enable and
-          // flush live bytes — a query that arrived live is current and should
-          // still be answered. The write callback runs after xterm has emitted
-          // every reply the backlog would trigger.
-          replaying = true;
-          term.write(msg.data, () => {
-            replaying = false;
-            flushPending();
-          });
-        } else {
-          flushPending();
-        }
+        if (msg.data) pending.unshift(msg.data); // backlog goes before live bytes
+        flush();
         return;
       }
       if (msg.t === 'pane:data' && msg.paneId === paneId) {
-        if (attached) term.write(msg.data);
-        else pending.push(msg.data);
+        pending.push(msg.data);
+        flush();
       }
       if (msg.t === 'pane:exit' && msg.paneId === paneId) {
-        const line = `\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`;
-        if (attached) term.write(line);
-        else pending.push(line);
+        pending.push(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+        flush();
       }
     });
 
     backend.send({ t: 'pane:attach', paneId });
 
     // ResizeObserver rather than a window listener: panes resize when a divider
-    // moves or a sibling closes, neither of which resizes the window.
+    // moves or a sibling closes, neither of which resizes the window. It also
+    // fires once on observe, which is how a pane that mounted hidden becomes
+    // ready the moment it is shown.
     const observer = new ResizeObserver(() => {
+      if (disposed) return;
+      if (!ready) {
+        tryReady();
+        return;
+      }
       try {
         fit.fit();
         backend.send({ t: 'pane:resize', paneId, cols: term.cols, rows: term.rows });
@@ -135,9 +142,8 @@ export function TerminalPane({
     });
     observer.observe(host);
 
-    onReady?.(term.cols, term.rows);
-
     return () => {
+      disposed = true;
       off();
       observer.disconnect();
       term.dispose();

@@ -21,6 +21,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { WebSocket as NodeWebSocket } from 'ws';
 import type { AppState } from '../core/models.js';
 import type { ClientMessage, ServerMessage } from './protocol.js';
 
@@ -65,9 +66,16 @@ export class ConvexMirror {
     }
     try {
       const { ConvexClient } = (await import('convex/browser')) as {
-        ConvexClient: new (url: string) => ConvexClientLike;
+        ConvexClient: new (url: string, options?: unknown) => ConvexClientLike;
       };
-      mirror.client = new ConvexClient(url);
+      // Hand Convex the `ws` package's WebSocket rather than let it pick up
+      // Node's built-in undici WebSocket, which is experimental and crashes the
+      // client on the first message it receives ("Cannot read properties of
+      // null (reading 'length')" in web_socket_manager). `ws` is already a
+      // dependency (the app's own server uses it).
+      mirror.client = new ConvexClient(url, {
+        webSocketConstructor: NodeWebSocket as unknown as typeof WebSocket,
+      });
       console.log(`[convex] realtime agent connected to ${url} as ${mirror.profileKey}`);
     } catch (err) {
       console.warn('[convex] client unavailable; running local-only:', (err as Error).message);

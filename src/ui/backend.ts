@@ -62,6 +62,13 @@ export class Backend {
   private latestEnv: ServerMessage | null = null;
   private latestRuntime = new Map<string, ServerMessage>();
   private snapshots = new Map<string, { snapshot: string; outputVersion: number }>();
+  /**
+   * Panes whose terminal mounted and asked for its backlog before any output
+   * had arrived over Convex. We answer them with a `pane:snapshot` the moment
+   * the first `terminalState` row for that pane lands, so the very first chunk
+   * of output is never lost to the attach handshake.
+   */
+  private attachWaiters = new Set<string>();
   private seenEvents = new Set<string>();
   private readonly profileKey = import.meta.env.VITE_CONVEX_PROFILE || 'default';
 
@@ -126,7 +133,12 @@ export class Backend {
       for (const row of rows as any[]) {
         const previous = this.snapshots.get(row.paneId);
         this.snapshots.set(row.paneId, { snapshot: row.snapshot, outputVersion: row.outputVersion });
-        if (previous && row.outputVersion > previous.outputVersion && row.lastChunk) {
+        if (this.attachWaiters.has(row.paneId)) {
+          // A terminal was waiting for its backlog: hand it the whole snapshot
+          // now (completing its attach), then stream only increments after.
+          this.attachWaiters.delete(row.paneId);
+          this.emit({ t: 'pane:snapshot', paneId: row.paneId, data: row.snapshot });
+        } else if (previous && row.outputVersion > previous.outputVersion && row.lastChunk) {
           this.emit({ t: 'pane:data', paneId: row.paneId, data: row.lastChunk });
         }
       }
@@ -194,12 +206,14 @@ export class Backend {
 
   send(msg: ClientMessage) {
     if (this.convex) {
-      // A terminal that just mounted wants its backlog: answer locally from the
-      // snapshot the terminalState subscription already holds, matching the
-      // WebSocket server's pane:attach reply.
+      // A terminal that just mounted wants its backlog. If we already have a
+      // snapshot for the pane, answer immediately; otherwise remember the pane
+      // and answer when its first terminalState row lands, so a freshly-spawned
+      // pane's opening output is not dropped by an empty early reply.
       if (msg.t === 'pane:attach') {
         const snap = this.snapshots.get(msg.paneId);
-        this.emit({ t: 'pane:snapshot', paneId: msg.paneId, data: snap?.snapshot ?? '' });
+        if (snap) this.emit({ t: 'pane:snapshot', paneId: msg.paneId, data: snap.snapshot });
+        else this.attachWaiters.add(msg.paneId);
         return;
       }
       this.enqueue(msg);
