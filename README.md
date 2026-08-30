@@ -36,7 +36,7 @@ Ported from a Claude-Code-based multiplexer to Devin, web-first.
   and every tool call paired with its result, duration and structured diff.
 - **Context health** — a live `NN%` occupancy estimate per pane, green/amber/red.
 - **Persistence** — workspaces, layouts and sessions live in `~/.devin-agent-tmux/`
-  as one JSON file per entity, mirrored to Convex for cross-device sync.
+  as one JSON file per entity, synchronized through Convex alongside remote terminal I/O.
 
 ---
 
@@ -56,7 +56,7 @@ flowchart TB
         ACPC["ACP client<br/>JSON-RPC/stdio"]
         HW["HealthWatcher"]
         FS["FileStore<br/>atomic · diffed"]
-        CM["ConvexMirror<br/>best-effort"]
+        CM["Convex realtime bridge<br/>commands · output · state"]
     end
 
     subgraph core["src/core — pure, host-agnostic, unit-tested"]
@@ -268,13 +268,46 @@ Open http://localhost:5173.
 **Requirements:** Node ≥ 20, a C toolchain for `node-pty`, and `devin` on your
 `PATH` (`devin auth login` done once).
 
-Optional Convex sync:
+### Remote access through Convex
+
+The original local flow remains available when Convex is unset:
+`xterm → WebSocket → Node server → node-pty`, with PTY output returning over the
+same socket. When `VITE_CONVEX_URL`/`CONVEX_URL` are set, the existing transport
+interface instead uses `browser → Convex commands → Node machine agent →
+node-pty`; batched PTY output, runtime events, and workspace state return through
+subscribed Convex queries.
+
+Start the Convex function watcher and app in separate terminals, then keep the
+machine agent running:
 
 ```bash
-npx convex dev       # writes .env.local with CONVEX_URL
+npx convex dev       # terminal 1: deploy schema/functions and keep watching
+npm run dev          # terminal 2: machine agent + local browser
 ```
 
-Without it the app runs local-only and says so at startup.
+`npx convex dev` writes the deployment URL to `.env.local`. The browser and
+machine must use the same URL and profile key (`default` unless changed):
+
+```dotenv
+VITE_CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_URL=https://your-deployment.convex.cloud
+VITE_CONVEX_PROFILE=default
+CONVEX_PROFILE=default
+```
+
+For an internet-accessible browser, build with `VITE_CONVEX_URL` set and publish
+`dist/web` on any static host. On the terminal machine only the persistent agent
+is required:
+
+```bash
+npm run build
+npm run dev:server
+```
+
+The static host never needs LAN access to the machine. Convex stores a bounded
+recent terminal snapshot for initial page load and subscriptions continue from
+there. Keep `npm run dev:server` running while using the remote terminal. Without
+Convex variables, `npm run dev` keeps using the original local WebSocket path.
 
 **Try:** pick a layout → **Run Devin** in an empty pane → watch the badge go
 `running`; **Sessions…** → **Resume** an old session, or **Trace** one to read it
@@ -292,7 +325,7 @@ Each of these was a fork in the road, decided deliberately:
 | Where agents run | **Local-first web** | `devin`, its auth, your repos and git worktrees are all on your machine. A hosted version needs per-user containers — bigger than the app. |
 | Pane model | **Real TUI over PTY**, ACP read-only | ACP is a *driver* protocol; it cannot attach to a session a PTY holds (`isLocked`). Driving panes over ACP would mean reimplementing Devin's client. |
 | Live trace | **History-only in v1** | Same lock. Live tracing needs a hook event-stream or a SQLite tail; both were designed and deferred rather than half-built. |
-| Session store | **Local files + Convex mirror** | Offline-first, inspectable, and a Convex outage costs sync rather than your workspaces. |
+| Session store | **Local files + Convex realtime** | Local files remain inspectable while Convex carries remote commands, terminal output, and synchronized state. |
 | Trace source | **ACP**, not SQLite | `session/list` / `session/load` are supported API. `sessions.db` is richer but internal, unversioned, and would break silently. |
 | Repo shape | **Single package** | The monorepo existed to share UI between web and Electron. Web-only removed its reason to exist. |
 

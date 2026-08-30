@@ -36,4 +36,41 @@ export default defineSchema({
   })
     .index('by_profile', ['profileKey'])
     .index('by_workspace', ['profileKey', 'workspaceId']),
+
+  machineStatus: defineTable({
+    profileKey: v.string(),
+    home: v.string(),
+    cwd: v.string(),
+    agentId: v.string(),
+    lastSeen: v.number(),
+  }).index('by_profile', ['profileKey']),
+
+  terminalCommands: defineTable({
+    profileKey: v.string(),
+    commandId: v.string(),
+    message: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_profile', ['profileKey'])
+    .index('by_command', ['profileKey', 'commandId']),
+
+  terminalPanes: defineTable({
+    profileKey: v.string(),
+    paneId: v.string(),
+    snapshot: v.string(),
+    lastChunk: v.string(),
+    outputVersion: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_profile', ['profileKey'])
+    .index('by_pane', ['profileKey', 'paneId']),
+
+  realtimeEvents: defineTable({
+    profileKey: v.string(),
+    eventId: v.string(),
+    message: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_profile', ['profileKey'])
+    .index('by_event', ['profileKey', 'eventId']),
 });

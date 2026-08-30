@@ -22,8 +22,10 @@ const PORT = Number(process.env.PORT || 5177);
 
 const store = new FileStore();
 const clients = new Set<WebSocket>();
+let mirror: ConvexMirror | null = null;
 
 function broadcast(msg: ServerMessage) {
+  mirror?.publish(msg);
   const payload = JSON.stringify(msg);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) ws.send(payload);
@@ -51,17 +53,21 @@ const supervisor = new PaneSupervisor(store, {
 const health = new HealthWatcher((paneId, h) => broadcast({ t: 'pane:health', paneId, health: h }));
 health.start();
 
-const mirror = await ConvexMirror.create(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
+mirror = await ConvexMirror.create(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
 
-async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
+async function handle(
+  send: (message: ServerMessage) => void,
+  msg: ClientMessage,
+  source?: WebSocket,
+): Promise<void> {
   switch (msg.t) {
     case 'state:save': {
       store.save(msg.state);
-      mirror.push(msg.state);
+      mirror?.push(msg.state);
       // Echo to OTHER clients so two open tabs converge; echoing to the sender
       // would fight its own local edits.
       for (const peer of clients) {
-        if (peer !== ws && peer.readyState === peer.OPEN) {
+        if (peer !== source && peer.readyState === peer.OPEN) {
           peer.send(JSON.stringify({ t: 'state', state: msg.state } satisfies ServerMessage));
         }
       }
@@ -102,9 +108,9 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
     case 'sessions:list': {
       try {
         const sessions = await listSessions(msg.cwd);
-        ws.send(JSON.stringify({ t: 'sessions:result', reqId: msg.reqId, sessions } satisfies ServerMessage));
+        send({ t: 'sessions:result', reqId: msg.reqId, sessions });
       } catch (err) {
-        ws.send(JSON.stringify({ t: 'sessions:result', reqId: msg.reqId, error: (err as Error).message } satisfies ServerMessage));
+        send({ t: 'sessions:result', reqId: msg.reqId, error: (err as Error).message });
       }
       break;
     }
@@ -113,14 +119,17 @@ async function handle(ws: WebSocket, msg: ClientMessage): Promise<void> {
       try {
         const updates = await loadSession(msg.sessionId, msg.cwd);
         const trace = buildTrace(msg.sessionId, updates);
-        ws.send(JSON.stringify({ t: 'trace:result', reqId: msg.reqId, trace } satisfies ServerMessage));
+        send({ t: 'trace:result', reqId: msg.reqId, trace });
       } catch (err) {
-        ws.send(JSON.stringify({ t: 'trace:result', reqId: msg.reqId, error: (err as Error).message } satisfies ServerMessage));
+        send({ t: 'trace:result', reqId: msg.reqId, error: (err as Error).message });
       }
       break;
     }
   }
 }
+
+mirror.push(store.load());
+mirror.start((message) => handle((response) => mirror?.publish(response), message));
 
 const http = createServer((req, res) => {
   if (req.url === '/api/health') {
@@ -145,7 +154,9 @@ wss.on('connection', (ws) => {
     } catch {
       return;
     }
-    void handle(ws, msg).catch((err) => console.error('[server]', err));
+    void handle((message) => ws.send(JSON.stringify(message)), msg, ws).catch((err) =>
+      console.error('[server]', err),
+    );
   });
 
   ws.on('close', () => clients.delete(ws));
@@ -162,6 +173,7 @@ http.listen(PORT, '127.0.0.1', () => {
 function shutdown() {
   supervisor.killAll();
   health.stop();
+  mirror?.close();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
