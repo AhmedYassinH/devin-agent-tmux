@@ -280,11 +280,20 @@ a, .link { color: var(--link); text-decoration: underline; font-family: var(--fo
 
 /* The terminal is the beveled product photograph, notched into the card body */
 .term-host {
-  flex: 1; min-height: 0; margin: var(--m);
+  flex: 1; min-height: 0; margin: var(--m); position: relative;
   background: #000; border: 2px solid var(--frame-ink);
   box-shadow: 3px 3px 0 rgba(0, 0, 0, .55);
   padding: var(--s);
 }
+.term-optimistic {
+  position: absolute; z-index: 10; left: var(--s); bottom: var(--s);
+  max-width: calc(100% - 2 * var(--s)); overflow: hidden;
+  padding: 2px 4px; pointer-events: none; white-space: pre;
+  color: #fff; background: rgba(0, 0, 0, .88);
+  border-bottom: 1px dashed var(--yellow-sticker);
+  font: 400 12px/1.25 var(--font-mono);
+}
+.term-optimistic:empty { display: none; }
 
 /* new-burst-sticker: taped on at an angle when a pane needs you */
 .burst {

@@ -46,7 +46,33 @@ export function TerminalPane({
     fit.fit();
     termRef.current = term;
 
-    term.onData((data) => backend.send({ t: 'pane:input', paneId, data }));
+    const optimistic = document.createElement('div');
+    optimistic.className = 'term-optimistic';
+    host.appendChild(optimistic);
+    let optimisticText = '';
+    let optimisticTimer: number | null = null;
+    const clearOptimistic = () => {
+      optimisticText = '';
+      optimistic.textContent = '';
+      if (optimisticTimer !== null) window.clearTimeout(optimisticTimer);
+      optimisticTimer = null;
+    };
+    const showOptimistic = (data: string) => {
+      if (optimisticTimer !== null) window.clearTimeout(optimisticTimer);
+      for (const char of data) {
+        if (char === '\x7f' || char === '\b') optimisticText = Array.from(optimisticText).slice(0, -1).join('');
+        else if (char === '\r' || char === '\n') optimisticText += ' ↵';
+        else if (char >= ' ') optimisticText += char;
+      }
+      optimisticText = Array.from(optimisticText).slice(-160).join('');
+      optimistic.textContent = optimisticText;
+      optimisticTimer = window.setTimeout(clearOptimistic, 1500);
+    };
+
+    term.onData((data) => {
+      showOptimistic(data);
+      backend.send({ t: 'pane:input', paneId, data });
+    });
 
     let disposed = false;
     let pendingWrites = 0;
@@ -63,8 +89,15 @@ export function TerminalPane({
     const subscribeFrame = requestAnimationFrame(() => {
       if (disposed) return;
       off = backend.subscribe((msg) => {
-        if (msg.t === 'pane:data' && msg.paneId === paneId) write(msg.data);
+        if (msg.t === 'pane:data' && msg.paneId === paneId) {
+          write(msg.data);
+          if (optimisticText) {
+            if (optimisticTimer !== null) window.clearTimeout(optimisticTimer);
+            optimisticTimer = window.setTimeout(clearOptimistic, 120);
+          }
+        }
         if (msg.t === 'pane:exit' && msg.paneId === paneId) {
+          clearOptimistic();
           write(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
         }
       });
@@ -95,6 +128,8 @@ export function TerminalPane({
       cancelAnimationFrame(subscribeFrame);
       off();
       observer.disconnect();
+      clearOptimistic();
+      optimistic.remove();
       if (pendingWrites === 0) term.dispose();
       termRef.current = null;
     };
