@@ -3,8 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:," />
     <title>devin-agent-tmux</title>
+
+    <!--
+      Instrument's three faces (see DESIGN.md §3). Preconnect first so the app
+      shell and the webfonts are fetched in parallel rather than in series.
+
+        display  Cabinet Grotesk  (Fontshare)     — headings only, never < 24px
+        body     IBM Plex Sans    (Google, OFL)   — everything read in sentences
+        mono     IBM Plex Mono    (Google, OFL)   — readouts, data, code, paths
+
+      If Fontshare is unreachable the display stack falls through to IBM Plex
+      Sans at 700 with tightened tracking, which is the fallback DESIGN.md
+      prescribes — we never substitute a different display face.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://api.fontshare.com/v2/css?f%5B%5D=cabinet-grotesk@500,600,700,800&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

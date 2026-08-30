@@ -161,6 +161,7 @@ export const updateMachineStatus = mutation({
     home: v.string(),
     cwd: v.string(),
     agentId: v.string(),
+    hasDefaultContextKey: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const profileKey = args.profileKey ?? 'default';
@@ -168,7 +169,14 @@ export const updateMachineStatus = mutation({
       .query('machineStatus')
       .withIndex('by_profile', (q) => q.eq('profileKey', profileKey))
       .unique();
-    const value = { profileKey, home: args.home, cwd: args.cwd, agentId: args.agentId, lastSeen: Date.now() };
+    const value = {
+      profileKey,
+      home: args.home,
+      cwd: args.cwd,
+      agentId: args.agentId,
+      hasDefaultContextKey: args.hasDefaultContextKey,
+      lastSeen: Date.now(),
+    };
     if (row) await ctx.db.patch(row._id, value);
     else await ctx.db.insert('machineStatus', value);
   },

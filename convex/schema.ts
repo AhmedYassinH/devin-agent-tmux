@@ -42,6 +42,7 @@ export default defineSchema({
     home: v.string(),
     cwd: v.string(),
     agentId: v.string(),
+    hasDefaultContextKey: v.optional(v.boolean()),
     lastSeen: v.number(),
   }).index('by_profile', ['profileKey']),
 

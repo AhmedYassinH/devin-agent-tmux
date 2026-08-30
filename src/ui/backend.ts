@@ -7,7 +7,7 @@
  */
 import { ConvexClient } from 'convex/browser';
 import type { ClientMessage, ServerMessage } from '../server/protocol.js';
-import type { AcpSessionSummary } from '../core/acp.js';
+import type { AcpErrorKind, AcpSessionSummary } from '../core/acp.js';
 import type { AppState, Workspace } from '../core/models.js';
 import type { Trace } from '../core/trace.js';
 
@@ -22,6 +22,21 @@ type ConvexClientLike = {
   ) => () => void;
 };
 type QueuedCommand = { commandId: string; message: string; createdAt: number };
+
+/**
+ * A request that failed, carrying the server's classification.
+ *
+ * `kind` is what lets the trace panel tell "this session is open in a pane"
+ * (expected, and the user can act on it) apart from an actual fault.
+ */
+export class BackendError extends Error {
+  readonly kind: AcpErrorKind;
+  constructor(message: string, kind: AcpErrorKind = 'unknown') {
+    super(message);
+    this.name = 'BackendError';
+    this.kind = kind;
+  }
+}
 
 export class Backend {
   private ws: WebSocket | null = null;
@@ -80,7 +95,14 @@ export class Backend {
     });
 
     this.convex.onUpdate('mux:getMachineStatus', args, (value) => {
-      if (value) this.emit({ t: 'env', home: value.home, cwd: value.cwd });
+      if (value) {
+        this.emit({
+          t: 'env',
+          home: value.home,
+          cwd: value.cwd,
+          hasDefaultContextKey: value.hasDefaultContextKey ?? false,
+        });
+      }
     });
 
     this.convex.onUpdate('mux:terminalState', args, (rows) => {
@@ -235,7 +257,7 @@ export class Backend {
    */
   private request<T>(
     msg: ClientMessage,
-    match: (m: ServerMessage) => { value: T } | { error: string } | undefined,
+    match: (m: ServerMessage) => { value: T } | { error: string; kind?: AcpErrorKind } | undefined,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
@@ -247,7 +269,7 @@ export class Backend {
         if (!outcome) return;
         window.clearTimeout(timer);
         off();
-        if ('error' in outcome) reject(new Error(outcome.error));
+        if ('error' in outcome) reject(new BackendError(outcome.error, outcome.kind));
         else resolve(outcome.value);
       });
       this.send(msg);
@@ -266,7 +288,7 @@ export class Backend {
     const reqId = Math.random().toString(36).slice(2);
     return this.request<Trace>({ t: 'trace:load', sessionId, cwd, reqId }, (m) => {
       if (m.t !== 'trace:result' || m.reqId !== reqId) return undefined;
-      if (m.error) return { error: m.error };
+      if (m.error) return { error: m.error, kind: m.errorKind };
       return m.trace ? { value: m.trace } : { error: 'the agent returned no trace' };
     });
   }

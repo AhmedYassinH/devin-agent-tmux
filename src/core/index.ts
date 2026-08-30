@@ -1,6 +1,7 @@
 export * from './models.js';
 export * from './launch.js';
 export * from './hooks.js';
+export * from './mcp.js';
 export * from './osc.js';
 export * from './status.js';
 export * from './layout.js';

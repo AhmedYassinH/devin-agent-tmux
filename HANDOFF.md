@@ -4,7 +4,7 @@ Read this first. It records **why** things are the way they are, and the
 empirically-verified facts about the Devin CLI that were expensive to discover.
 Re-deriving them costs real time; contradicting them will break the app.
 
-**Status:** working v1. 67 tests pass, typecheck clean, production build succeeds,
+**Status:** working v1. 87 tests pass, typecheck clean, production build succeeds,
 both halves verified end-to-end against real Devin CLI `3000.6.7`.
 
 ---
@@ -37,12 +37,22 @@ named alternatives.
 | Pane model | **Real TUI over PTY**; ACP read-only | ACP is a *driver* protocol — it cannot attach to a session a PTY holds. Driving panes over ACP means reimplementing Devin's client. |
 | Live trace | **History-only in v1** | Same lock constraint. Options were designed and deferred, not half-built. |
 | Repo shape | **Single package** | The monorepo existed to share UI between web and Electron. Web-only removed its reason to exist. |
+| Default MCP | **context.dev, per workspace** | Every pane gets it without being asked. The key is collected when a workspace is created and falls back to `CONTEXT_DEV_API_KEY` in `.env`, so a blank field still gets the server. Per-workspace rather than global because two workspaces may bill to two accounts — and because writing one key into the user's global `mcp_config.json` would change sessions this app did not start. |
 
-**Design language:** "Dell 1996 Inspired" — black page frame, flat catalog-color
-ribbon cards, Arial Black display / Helvetica UI / **Times Roman body**, zero
-border-radius except award seals. The palette is **closed**: red is reserved for
-the CTA panel, the banner callout and the cert-seal *only*, which is why `exited`
-status and the `handoff` context tier use `tint-salmon` rather than brand red.
+**Design language:** **Instrument** — a precision-instrument system, specified in
+full in `DESIGN.md` at the repo root, which is authoritative for every colour,
+type step, spacing, radius and motion value. Cold graphite surfaces
+(`canvas → surface-1 → surface-2 → surface-3`) with depth built from surface
+steps and two hairline weights, never from shadow, gradient or glow. One accent —
+machined brass `#C8A15A` — used roughly six times per screen and never as
+decoration. Three faces, three jobs: Cabinet Grotesk display, IBM Plex Sans body,
+IBM Plex Mono for anything measured (readouts, ids, paths, timings). The
+signature element is the **readout rule**: a hairline with a mono micro-label
+interrupting it flush left and an optional value flush right, used as the section
+eyebrow and card header. Dark-first with a designed cold-paper light mode via
+`prefers-color-scheme`. Status is carried by a 6px dot **plus a word**, never by
+colour alone. Read `DESIGN.md` before editing any UI and use only tokens defined
+there.
 
 ---
 
@@ -98,6 +108,35 @@ All confirmed by probing the real binary, not from docs alone.
 8. **node-pty's `spawn-helper` ships at 644** — npm strips the exec bit, and every
    PTY spawn fails with `posix_spawnp failed`. `scripts/fix-node-pty.mjs` runs on
    postinstall. Do not remove it.
+
+9. **`--config` does NOT carry MCP servers.** This one closes off the obvious
+   approach, so it is worth stating flatly. All three probed against 3000.6.7:
+
+   - an `mcpServers` key **inside** the file `--config` points at → ignored
+   - an `mcp_config.json` sitting **next to** that file → ignored
+   - `XDG_CONFIG_HOME` → **works**, relocates `mcp_config.json` lookup
+
+   Devin reads MCP servers from dedicated files (`~/.config/devin/mcp_config.json`,
+   `.devin/mcp_config.json`, `.devin/mcp_config.local.json`) and `--config`
+   overrides only the *main* config. So per-pane hooks and per-pane MCP need two
+   different mechanisms — see `server/devin-config-dir.ts`.
+
+   `XDG_CONFIG_HOME` is not Devin's variable, it is everyone's: a bare redirect
+   would also move `git`, `gh` and anything else the agent shells out to. The
+   pane's dir is therefore a **shadow** of `~/.config` — every entry symlinked
+   through, with a real `devin/` whose `config.json` and `mcp_config.json` we
+   generate. Credentials live under `XDG_DATA_HOME` and are untouched, which is
+   why a redirected session stays authenticated. Verified end-to-end: a pane
+   built this way runs as the logged-in user and completes a real context.dev
+   tool call.
+
+   Both `{"type":"http"}` (the `.mcp.json` form) and `{"transport":"http"}`
+   (Devin's native form) parse. We write the former.
+
+10. **A locked session's ACP error is a wire object, not a message.** Rejecting
+    with `JSON.stringify(error)` put raw JSON-RPC in front of the user for what
+    is an *expected* state (trap 5). `core/acp.ts:describeAcpError` classifies it;
+    the trace panel renders `locked` as an explanation, never as an error.
 
 ### ACP capabilities (from a live `initialize` handshake)
 
@@ -165,12 +204,15 @@ src/core/     pure logic — no React, no Node, no transport. All unit-tested.
   context-health.ts  occupancy from per-turn export deltas (READ THE COMMENT)
   layout.ts          split tree, templates 1-6, layoutForSessions
   workspace.ts       workspace/session CRUD, dirBasename, uniqueWorkspaceName
-  acp.ts             ACP wire types (captured from the live server)
+  acp.ts             ACP wire types + describeAcpError (classify a failure)
+  mcp.ts             context.dev entry + non-destructive mcp_config merge
   models.ts          domain types + DEFAULT_PERMISSION_MODE
 
 src/server/   the local host (Node)
   index.ts           ws + http, message routing
   panes.ts           node-pty supervisor, per-pane config, OSC extraction
+  devin-config-dir.ts  per-pane XDG config dir (READ THE HEADER)
+  env.ts             minimal .env reader; the server gets none from Vite
   acp-client.ts      short-lived `devin acp` JSON-RPC subprocess
   health.ts          polls each pane's --export transcript (4s)
   store.ts           ~/.devin-agent-tmux, atomic + diffed writes
@@ -181,7 +223,7 @@ src/server/   the local host (Node)
 src/ui/       React + xterm.js
   App.tsx            shell, state, banner, panes
   Guide.tsx          the guide popup (first-run + banner button)
-  theme.ts           catalog tints + CRT terminal palette
+  theme.ts           Instrument token literals + the xterm palette
   ... LayoutView, Sidebar, TerminalPane, PaneLauncher,
       SessionPicker, TracePanel, NameDialog, StatusBadge, backend
 
@@ -192,6 +234,9 @@ scripts/      node-pty fix + two smoke tests
 **Three seams:** PTY (bidirectional, the live agent) · Hooks→OSC (agent→app,
 status + identity) · ACP (app→agent, read-only history).
 
+**Two config channels, and they are not interchangeable** — `--config` carries
+the hooks, `XDG_CONFIG_HOME` carries the MCP servers. See §3 trap 9.
+
 ---
 
 ## 6. Run & verify
@@ -199,7 +244,7 @@ status + identity) · ACP (app→agent, read-only history).
 ```bash
 npm install          # postinstall fixes node-pty's spawn-helper exec bit
 npm run dev          # Vite :5173 + PTY/ACP server :5177
-npm test             # 67 tests
+npm test             # 87 tests
 npm run typecheck
 ```
 

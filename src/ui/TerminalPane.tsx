@@ -11,7 +11,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { Backend } from './backend.js';
-import { TERMINAL_THEME } from './theme.js';
+import { TERMINAL_FONT, TERMINAL_THEME } from './theme.js';
 
 export function TerminalPane({
   paneId,
@@ -31,10 +31,11 @@ export function TerminalPane({
     if (!host) return;
 
     const term = new Terminal({
-      // Courier New is the period-correct monospace; the terminal is the
-      // ribbon card's beveled CRT product photograph.
-      fontFamily: '"Courier New", Courier, monospace',
-      fontSize: 12,
+      // IBM Plex Mono is the system's measuring face (DESIGN.md §3), and the
+      // terminal is the one surface that is nothing but measurement.
+      fontFamily: TERMINAL_FONT,
+      fontSize: 13,
+      lineHeight: 1.3,
       cursorBlink: true,
       allowProposedApi: true,
       theme: { ...TERMINAL_THEME },

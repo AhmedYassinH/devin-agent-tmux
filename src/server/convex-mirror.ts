@@ -76,6 +76,7 @@ export class ConvexMirror {
         home: homedir(),
         cwd: process.cwd(),
         agentId: this.agentId,
+        hasDefaultContextKey: Boolean(process.env.CONTEXT_DEV_API_KEY?.trim()),
       });
     updateStatus();
     this.heartbeat = setInterval(updateStatus, 10_000);

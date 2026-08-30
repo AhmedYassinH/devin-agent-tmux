@@ -35,6 +35,11 @@ Ported from a Claude-Code-based multiplexer to Devin, web-first.
 - **Trace panel** — turn-by-turn replay of a session: prompts, replies, thinking,
   and every tool call paired with its result, duration and structured diff.
 - **Context health** — a live `NN%` occupancy estimate per pane, green/amber/red.
+- **context.dev pre-registered** — every pane starts with the
+  [context.dev](https://context.dev) MCP server already connected: web search,
+  scraping, crawling, structured extraction and document parsing, with no
+  per-session setup. The key is per workspace, so two workspaces can bill to two
+  accounts, and falls back to one default for everything else.
 - **Persistence** — workspaces, layouts and sessions live in `~/.devin-agent-tmux/`
   as one JSON file per entity, synchronized through Convex alongside remote terminal I/O.
 
@@ -250,9 +255,10 @@ trace "Implement plan-b03afdaeb5d4e16d"
   structured diffs: 49
 ```
 
-**Unit tests**: `npm test` → 34 tests across launch-argument building, the OSC
-scanner (including sequences split across reads), the trace fold, layout ops and
-the context-health estimator.
+**Unit tests**: `npm test` → 87 tests across launch-argument building, the OSC
+scanner (including sequences split across reads), the trace fold, layout ops, the
+context-health estimator, the context.dev config merge, the per-pane config
+directory and ACP error classification.
 
 ---
 
@@ -267,6 +273,34 @@ Open http://localhost:5173.
 
 **Requirements:** Node ≥ 20, a C toolchain for `node-pty`, and `devin` on your
 `PATH` (`devin auth login` done once).
+
+### context.dev (the default MCP server)
+
+Copy `.env.example` to `.env` and set a key to give every pane the context.dev
+tools out of the box:
+
+```bash
+cp .env.example .env
+# CONTEXT_DEV_API_KEY=ctxt_secret_…
+```
+
+This is the fallback. **New workspace** has its own *context.dev API key* field;
+a key set there wins for that workspace's panes, and leaving it blank uses the
+`.env` one. With neither set, panes simply run without context.dev.
+
+The key is read by the server and never crosses the websocket — the browser is
+told only *whether* a default exists, so the dialog can say what a blank field
+will do. At spawn, the key is written into that pane's own
+`mcp_config.json` at `0600`.
+
+> **Why per pane, and why not just `devin mcp add -s user`?** `--config` cannot
+> carry MCP servers — Devin reads them from dedicated `mcp_config.json` files, and
+> `--config` overrides only the main config. So each pane gets its own
+> `XDG_CONFIG_HOME` pointing at a **shadow** of `~/.config`: every entry symlinked
+> through, with a generated `devin/mcp_config.json`. Your own MCP servers, skills
+> and rules all still resolve, your global config is never written to, and
+> credentials (under `XDG_DATA_HOME`) are untouched, so panes stay signed in.
+> `HANDOFF.md` §3 trap 9 has the probes that establish this.
 
 ### Remote access through Convex
 
@@ -328,6 +362,8 @@ Each of these was a fork in the road, decided deliberately:
 | Session store | **Local files + Convex realtime** | Local files remain inspectable while Convex carries remote commands, terminal output, and synchronized state. |
 | Trace source | **ACP**, not SQLite | `session/list` / `session/load` are supported API. `sessions.db` is richer but internal, unversioned, and would break silently. |
 | Repo shape | **Single package** | The monorepo existed to share UI between web and Electron. Web-only removed its reason to exist. |
+| Default MCP | **context.dev, per workspace** | Registered per pane via `XDG_CONFIG_HOME` rather than written into your global `~/.config/devin/mcp_config.json` — the app should not change sessions it did not start, and one global file cannot hold two workspaces' keys at once. |
+| Design language | **Instrument** | Cold graphite, one brass accent, engraved mono readouts. Specified in `DESIGN.md`, which is authoritative for every colour, type step and spacing value. Dark-first with a designed light mode. |
 
 ---
 

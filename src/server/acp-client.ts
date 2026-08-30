@@ -12,7 +12,30 @@
  * trade for a background reader.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { parseSessionSummary, type AcpInitializeResult, type AcpSessionSummary, type AcpSessionUpdate } from '../core/acp.js';
+import {
+  describeAcpError,
+  parseSessionSummary,
+  type AcpErrorKind,
+  type AcpFailure,
+  type AcpInitializeResult,
+  type AcpSessionSummary,
+  type AcpSessionUpdate,
+} from '../core/acp.js';
+
+/**
+ * A failed ACP request, carrying the classified reason alongside the sentence.
+ *
+ * The kind travels to the browser so the trace panel can present a locked
+ * session as the expected state it is, rather than as an error.
+ */
+export class AcpRequestError extends Error {
+  readonly kind: AcpErrorKind;
+  constructor(failure: AcpFailure) {
+    super(failure.message);
+    this.name = 'AcpRequestError';
+    this.kind = failure.kind;
+  }
+}
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -83,7 +106,10 @@ class AcpConnection {
       const p = this.pending.get(msg.id);
       if (!p) return;
       this.pending.delete(msg.id);
-      if (msg.error) p.reject(new Error(JSON.stringify(msg.error)));
+      // Never reject with the raw JSON-RPC object: it used to be stringified
+      // straight into the trace panel, where a locked session — an expected
+      // state, not a fault — appeared as a wall of red JSON.
+      if (msg.error) p.reject(new AcpRequestError(describeAcpError(msg.error)));
       else p.resolve(msg.result);
     }
   }

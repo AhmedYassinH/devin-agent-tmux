@@ -130,6 +130,7 @@ export class FileStore {
           ? ws.sessionOrder.filter((x): x is string => typeof x === 'string' && x in sessions)
           : Object.keys(sessions),
         sessions,
+        contextApiKey: typeof ws.contextApiKey === 'string' ? ws.contextApiKey : undefined,
         updatedAt: typeof ws.updatedAt === 'number' ? ws.updatedAt : 0,
       };
     }

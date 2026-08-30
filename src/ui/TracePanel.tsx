@@ -4,23 +4,33 @@
  * v1 is history-only by design: a pane's own session is held by its PTY, and
  * Devin permits one holder, so the live session cannot be replayed while it
  * runs. The panel says so rather than showing a stale or empty trace.
+ *
+ * The round red award seal that used to head this panel is gone: the figures
+ * now read as instrument metrics — a readout label over a `data`-type value —
+ * which is both more informative (three numbers, not one) and the treatment
+ * DESIGN.md prescribes for measurements.
  */
 import { useEffect, useState } from 'react';
-import type { AcpContentBlock } from '../core/acp.js';
+import type { AcpContentBlock, AcpErrorKind } from '../core/acp.js';
 import { traceSummary, type Trace, type TraceToolCall } from '../core/trace.js';
-import type { Backend } from './backend.js';
+import { BackendError, type Backend } from './backend.js';
 
-const KIND_ICON: Record<string, string> = {
-  read: '📖',
-  edit: '✏️',
-  delete: '🗑',
-  move: '📦',
-  search: '🔍',
-  execute: '⚡',
-  think: '💭',
-  fetch: '🌐',
-  switch_mode: '🔀',
-  other: '•',
+/**
+ * Engraved kind labels rather than emoji. The system's icon rules call for a
+ * 24px stroke set with square terminals; emoji are none of those things, and a
+ * four-character mono tag reads faster in a dense list anyway.
+ */
+const KIND_LABEL: Record<string, string> = {
+  read: 'read',
+  edit: 'edit',
+  delete: 'del',
+  move: 'move',
+  search: 'find',
+  execute: 'exec',
+  think: 'think',
+  fetch: 'fetch',
+  switch_mode: 'mode',
+  other: '—',
 };
 
 function Duration({ ms }: { ms: number | undefined }) {
@@ -43,7 +53,7 @@ function Block({ block }: { block: AcpContentBlock }) {
   if (block.type === 'text') {
     return <pre className="block-text">{(block as { text: string }).text}</pre>;
   }
-  return <div className="muted small">[{block.type}]</div>;
+  return <div className="dim small">[{block.type}]</div>;
 }
 
 function ToolRow({ tool }: { tool: TraceToolCall }) {
@@ -51,9 +61,12 @@ function ToolRow({ tool }: { tool: TraceToolCall }) {
   return (
     <div className={`tool tool-${tool.status}`}>
       <button className="tool-head" onClick={() => setOpen((o) => !o)}>
-        <span className="tool-icon">{KIND_ICON[tool.kind] ?? '•'}</span>
+        <span className="tool-kind">{KIND_LABEL[tool.kind] ?? '—'}</span>
         <span className="tool-title">{tool.title}</span>
-        <span className={`tool-status s-${tool.status}`}>{tool.status}</span>
+        <span className={`status tool-status s-${tool.status}`}>
+          <i className="dot" aria-hidden="true" />
+          <span className="status-label">{tool.status.replace('_', ' ')}</span>
+        </span>
         <Duration ms={tool.durationMs} />
       </button>
       {open && tool.content.length > 0 && (
@@ -79,16 +92,22 @@ export function TracePanel({
   onClose: () => void;
 }) {
   const [trace, setTrace] = useState<Trace | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ message: string; kind: AcpErrorKind } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setTrace(null);
-    setError(null);
+    setFailure(null);
     backend
       .loadTrace(sessionId, cwd)
       .then((t) => !cancelled && setTrace(t))
-      .catch((err: Error) => !cancelled && setError(err.message));
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setFailure({
+          message: err.message,
+          kind: err instanceof BackendError ? err.kind : 'unknown',
+        });
+      });
     return () => {
       cancelled = true;
     };
@@ -99,29 +118,60 @@ export function TracePanel({
   return (
     <aside className="trace">
       <header>
-        {/* cert-seal: one of red's three sanctioned uses in this design language */}
+        <div className="readout-rule">
+          <span className="rule-label">Session trace</span>
+          <i className="rule-line" />
+          <span className="rule-value">{sessionId}</span>
+        </div>
+
+        <div className="trace-title-row">
+          <h3>{trace?.title || sessionId}</h3>
+          <button className="ghost icon" onClick={onClose} aria-label="Close trace" title="Close">
+            ✕
+          </button>
+        </div>
+
         {summary && (
-          <div className="seal" title={`${summary.tools} tool calls in this session`}>
-            <b>{summary.tools}</b>
-            <span>Tool calls</span>
+          <div className="trace-metrics">
+            <div className="metric">
+              <span className="metric-label">Turns</span>
+              <span className="metric-value">{summary.turns}</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Tool calls</span>
+              <span className="metric-value">{summary.tools}</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Failed</span>
+              <span className={summary.failed > 0 ? 'metric-value failed' : 'metric-value'}>
+                {summary.failed}
+              </span>
+            </div>
           </div>
         )}
-        <div className="spacer">
-          <h3>{trace?.title || sessionId}</h3>
-          {summary && (
-            <p className="small">
-              {summary.turns} turns
-              {summary.failed > 0 && <span className="failed"> &middot; {summary.failed} failed</span>}
-            </p>
-          )}
-        </div>
-        <button className="ghost" onClick={onClose}>
-          ✕
-        </button>
       </header>
 
-      {error && <p className="error">{error}</p>}
-      {!trace && !error && <p className="muted">Replaying session over ACP…</p>}
+      {/* A locked session is the documented consequence of Devin's one-holder
+          lock, not a fault — so it reads as an explanation with the action the
+          user can actually take, and never as red JSON. */}
+      {failure?.kind === 'locked' && (
+        <div className="trace-status">
+          <p className="t-subheading">This session is running</p>
+          <p className="dim">
+            {failure.message} Close its pane, then reopen this trace.
+          </p>
+        </div>
+      )}
+      {failure && failure.kind !== 'locked' && (
+        <div className="trace-status">
+          <p className="error">{failure.message}</p>
+        </div>
+      )}
+      {!trace && !failure && (
+        <div className="trace-status">
+          <p className="dim">Replaying session over ACP…</p>
+        </div>
+      )}
 
       <div className="trace-body">
         {trace?.turns.map((turn, i) =>

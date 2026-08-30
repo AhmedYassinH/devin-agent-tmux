@@ -116,3 +116,55 @@ export function blockText(block: AcpContentBlock | undefined): string {
   }
   return '';
 }
+
+/**
+ * Why an ACP request failed, in terms the UI can act on.
+ *
+ * The JSON-RPC error object is a wire detail. Rendering it verbatim put
+ * `{"code":-32015,"message":"Session 'lofty-utahraptor' is already open in
+ * another process...","data":{"cognition.ai/errorKind":"session_locked",...}}`
+ * in front of the user, which is both unreadable and misleading: a locked
+ * session is not a failure, it is the documented consequence of Devin's
+ * one-holder-per-session lock (see HANDOFF §3.5). The pane holding it is
+ * working exactly as intended.
+ *
+ * Cognition namespaces the machine-readable reason under
+ * `data["cognition.ai/errorKind"]`, which is what we key on; the numeric code
+ * is the fallback for older servers.
+ */
+export type AcpErrorKind = 'locked' | 'not-found' | 'auth' | 'unknown';
+
+export interface AcpFailure {
+  kind: AcpErrorKind;
+  /** A sentence to show a person. Never raw JSON. */
+  message: string;
+}
+
+/** JSON-RPC error code Devin returns for a session held by another process. */
+const SESSION_LOCKED_CODE = -32015;
+
+export function describeAcpError(raw: unknown): AcpFailure {
+  const err = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const data = (typeof err.data === 'object' && err.data !== null ? err.data : {}) as Record<string, unknown>;
+  const errorKind = data['cognition.ai/errorKind'];
+  const serverMessage = typeof err.message === 'string' ? err.message : '';
+
+  if (errorKind === 'session_locked' || err.code === SESSION_LOCKED_CODE) {
+    return {
+      kind: 'locked',
+      message: 'This session is open in a pane. Devin allows one holder at a time, so its transcript can only be replayed once the pane is closed.',
+    };
+  }
+  if (errorKind === 'session_not_found' || /not found/i.test(serverMessage)) {
+    return {
+      kind: 'not-found',
+      message: 'Devin has no record of this session in that directory. Sessions are scoped by working directory.',
+    };
+  }
+  if (errorKind === 'auth_required' || /auth/i.test(serverMessage)) {
+    return { kind: 'auth', message: 'Devin needs to be signed in again. Run `devin auth login` in a terminal.' };
+  }
+
+  // Fall back to the server's own sentence — but only the sentence.
+  return { kind: 'unknown', message: serverMessage || 'The agent could not load this session.' };
+}
