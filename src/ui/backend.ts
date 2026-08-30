@@ -30,6 +30,8 @@ export class Backend {
   private queue: ClientMessage[] = [];
   private commandQueue: QueuedCommand[] = [];
   private commandTimer: number | null = null;
+  private resizeQueue = new Map<string, Extract<ClientMessage, { t: 'pane:resize' }>>();
+  private resizeTimer: number | null = null;
   private reconnectTimer: number | null = null;
   private latestState: ServerMessage | null = null;
   private latestEnv: ServerMessage | null = null;
@@ -150,11 +152,24 @@ export class Backend {
 
   send(msg: ClientMessage) {
     if (this.convex) {
-      this.enqueue(msg);
+      if (msg.t === 'pane:resize') this.enqueueResize(msg);
+      else this.enqueue(msg);
       return;
     }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
     else this.queue.push(msg);
+  }
+
+  private enqueueResize(msg: Extract<ClientMessage, { t: 'pane:resize' }>): void {
+    this.resizeQueue.set(msg.paneId, msg);
+    if (this.resizeTimer === null) this.resizeTimer = window.setTimeout(() => this.flushResizes(), 100);
+  }
+
+  private flushResizes(): void {
+    this.resizeTimer = null;
+    const pending = [...this.resizeQueue.values()];
+    this.resizeQueue.clear();
+    for (const msg of pending) this.enqueue(msg);
   }
 
   private enqueue(msg: ClientMessage): void {

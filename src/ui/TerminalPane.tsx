@@ -57,9 +57,14 @@ export function TerminalPane({
 
     // ResizeObserver rather than a window listener: panes resize when a divider
     // moves or a sibling closes, neither of which resizes the window.
+    let lastCols = 0;
+    let lastRows = 0;
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
+        if (term.cols === lastCols && term.rows === lastRows) return;
+        lastCols = term.cols;
+        lastRows = term.rows;
         backend.send({ t: 'pane:resize', paneId, cols: term.cols, rows: term.rows });
       } catch {
         /* zero-size while hidden in the tab strip */

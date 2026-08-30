@@ -128,6 +128,20 @@ export const pendingCommands = query({
       .take(500),
 });
 
+export const acknowledgeCommands = mutation({
+  args: { profileKey: v.optional(v.string()), commandIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const profileKey = args.profileKey ?? 'default';
+    for (const commandId of args.commandIds) {
+      const row = await ctx.db
+        .query('terminalCommands')
+        .withIndex('by_command', (q) => q.eq('profileKey', profileKey).eq('commandId', commandId))
+        .unique();
+      if (row) await ctx.db.delete(row._id);
+    }
+  },
+});
+
 export const acknowledgeCommand = mutation({
   args: { profileKey: v.optional(v.string()), commandId: v.string() },
   handler: async (ctx, args) => {

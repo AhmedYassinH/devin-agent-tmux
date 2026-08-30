@@ -111,27 +111,28 @@ export class ConvexMirror {
   }
 
   private consume(rows: CommandRow[], onCommand: (message: ClientMessage) => Promise<void>): void {
-    for (const row of rows) {
-      if (this.processing.has(row.commandId)) continue;
-      this.processing.add(row.commandId);
-      this.commandTail = this.commandTail.then(async () => {
+    const pending = rows.filter((row) => !this.processing.has(row.commandId));
+    if (pending.length === 0) return;
+    for (const row of pending) this.processing.add(row.commandId);
+    this.commandTail = this.commandTail.then(async () => {
+      for (const row of pending) {
         try {
           await onCommand(JSON.parse(row.message) as ClientMessage);
         } catch (err) {
           console.warn('[convex] command failed:', (err as Error).message);
         }
-        try {
-          await this.client?.mutation('mux:acknowledgeCommand', {
-            profileKey: this.profileKey,
-            commandId: row.commandId,
-          });
-        } catch (err) {
-          console.warn('[convex] command acknowledgement failed:', (err as Error).message);
-        } finally {
-          this.processing.delete(row.commandId);
-        }
-      });
-    }
+      }
+      try {
+        await this.client?.mutation('mux:acknowledgeCommands', {
+          profileKey: this.profileKey,
+          commandIds: pending.map((row) => row.commandId),
+        });
+      } catch (err) {
+        console.warn('[convex] command acknowledgement failed:', (err as Error).message);
+      } finally {
+        for (const row of pending) this.processing.delete(row.commandId);
+      }
+    });
   }
 
   private publishOutput(paneId: string, data: string): void {
