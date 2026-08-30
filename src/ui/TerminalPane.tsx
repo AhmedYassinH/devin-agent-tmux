@@ -48,11 +48,26 @@ export function TerminalPane({
 
     term.onData((data) => backend.send({ t: 'pane:input', paneId, data }));
 
-    const off = backend.subscribe((msg) => {
-      if (msg.t === 'pane:data' && msg.paneId === paneId) term.write(msg.data);
-      if (msg.t === 'pane:exit' && msg.paneId === paneId) {
-        term.write(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
-      }
+    let disposed = false;
+    let pendingWrites = 0;
+    let disposeRequested = false;
+    const write = (data: string) => {
+      if (disposed) return;
+      pendingWrites++;
+      term.write(data, () => {
+        pendingWrites--;
+        if (disposeRequested && pendingWrites === 0) term.dispose();
+      });
+    };
+    let off = () => {};
+    const subscribeFrame = requestAnimationFrame(() => {
+      if (disposed) return;
+      off = backend.subscribe((msg) => {
+        if (msg.t === 'pane:data' && msg.paneId === paneId) write(msg.data);
+        if (msg.t === 'pane:exit' && msg.paneId === paneId) {
+          write(`\r\n\x1b[2m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+        }
+      });
     });
 
     // ResizeObserver rather than a window listener: panes resize when a divider
@@ -75,9 +90,12 @@ export function TerminalPane({
     onReady?.(term.cols, term.rows);
 
     return () => {
+      disposed = true;
+      disposeRequested = true;
+      cancelAnimationFrame(subscribeFrame);
       off();
       observer.disconnect();
-      term.dispose();
+      if (pendingWrites === 0) term.dispose();
       termRef.current = null;
     };
     // paneId identifies the terminal; backend is stable for the app's lifetime.
