@@ -15,12 +15,19 @@ export type PaneStatus = 'idle' | 'running' | 'waiting' | 'exited';
  */
 export type DevinPermissionMode = 'auto' | 'accept-edits' | 'smart' | 'dangerous';
 
-export const PERMISSION_MODES: { value: DevinPermissionMode; label: string; hint: string }[] = [
-  { value: 'auto', label: 'Auto', hint: 'Auto-approves read-only tools' },
-  { value: 'accept-edits', label: 'Accept edits', hint: 'Also auto-approves workspace edits' },
-  { value: 'smart', label: 'Smart', hint: 'Also auto-runs actions a fast model judges safe' },
-  { value: 'dangerous', label: 'Dangerous', hint: 'Auto-approves every tool' },
-];
+/**
+ * The posture every pane launches with.
+ *
+ * `accept-edits` auto-approves workspace edits, so an agent can write files
+ * without stopping to ask. It does NOT auto-approve everything — shell commands
+ * and other side-effecting tools still raise a permission request, which is what
+ * drives the `waiting` badge.
+ *
+ * Not exposed as a launch-form field: a pane is the real Devin TUI, and
+ * `Shift+Tab` cycles the mode there (Normal -> Accept Edits -> Smart -> Bypass).
+ * Choosing it twice, in two places, is how the two get out of step.
+ */
+export const DEFAULT_PERMISSION_MODE: DevinPermissionMode = 'accept-edits';
 
 /** One pane: a `devin` process in a PTY, plus what we know about its session. */
 export interface SessionConfig {

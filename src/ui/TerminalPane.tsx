@@ -11,6 +11,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { Backend } from './backend.js';
+import { TERMINAL_THEME } from './theme.js';
 
 export function TerminalPane({
   paneId,
@@ -30,16 +31,13 @@ export function TerminalPane({
     if (!host) return;
 
     const term = new Terminal({
-      fontFamily: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+      // Courier New is the period-correct monospace; the terminal is the
+      // ribbon card's beveled CRT product photograph.
+      fontFamily: '"Courier New", Courier, monospace',
       fontSize: 12,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: {
-        background: '#1e1e2e',
-        foreground: '#cdd6f4',
-        cursor: '#f5e0dc',
-        selectionBackground: '#585b70',
-      },
+      theme: { ...TERMINAL_THEME },
       scrollback: 10_000,
     });
     const fit = new FitAddon();

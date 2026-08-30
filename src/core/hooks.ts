@@ -12,7 +12,11 @@
  * APPENDED to theirs rather than replacing them.
  *
  * Events chosen (Devin's set is a superset of Claude Code's):
- *   SessionStart      -> report Devin's chosen session id (closes the --session-id gap)
+ *   SessionStart      -> report Devin's chosen session id AND settle the badge to
+ *                        idle. Both, from one hook: a freshly launched pane that
+ *                        is never prompted produces no Stop event, so without the
+ *                        status half the badge stays stuck on its optimistic
+ *                        "running" forever.
  *   UserPromptSubmit  -> running
  *   Stop              -> idle
  *   PermissionRequest -> waiting   (the badge the user actually acts on)
@@ -114,10 +118,10 @@ process.stdin.on('end', () => {
   if (signal === 'session') {
     let id;
     try { id = JSON.parse(raw).session_id; } catch { /* unparseable payload */ }
-    // Nothing to report without an id — stay silent rather than emit a malformed
-    // sequence the scanner would have to reject.
-    if (!id) return done();
-    seq = '\\x1b]777;pane;session;' + id + '\\x07';
+    // The session has started and is sitting at its prompt: that is idle. Emit it
+    // even when the id is unreadable, because the badge matters more than the id.
+    seq = '\\x1b]777;pane;status;idle\\x07';
+    if (id) seq += '\\x1b]777;pane;session;' + id + '\\x07';
   } else {
     seq = '\\x1b]777;pane;status;' + signal + '\\x07';
   }

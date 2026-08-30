@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearSession, collectLeaves, firstEmptyLeafIndex, leafCount, setLeafAt, templateForCount, templateLayout } from './layout.js';
+import { collectLeaves, firstEmptyLeafIndex, layoutForSessions, leafCount, setLeafAt, templateForCount, templateLayout } from './layout.js';
 
 describe('templateLayout', () => {
   it('produces the advertised pane counts', () => {
@@ -25,11 +25,17 @@ describe('leaf placement', () => {
     expect(collectLeaves(l)).toEqual(['a', null]);
   });
 
-  it('keeps the grid shape when a pane closes', () => {
-    let l = setLeafAt(setLeafAt(templateLayout('1x2'), 0, 'a'), 1, 'b');
-    l = clearSession(l, 'a');
-    expect(collectLeaves(l)).toEqual([null, 'b']);
-    expect(leafCount(l)).toBe(2);
+  it('shrinks the grid to fit the panes that remain', () => {
+    // Closing a pane must not leave a hole: an empty launcher where a terminal
+    // was reads as "something is still here", and the Terminals count would
+    // disagree with what is on screen.
+    expect(collectLeaves(layoutForSessions(['a', 'b']))).toEqual(['a', 'b']);
+    expect(collectLeaves(layoutForSessions(['b']))).toEqual(['b']);
+    expect(leafCount(layoutForSessions(['b']))).toBe(1);
+  });
+
+  it('keeps one slot when the last pane closes, so you can launch again', () => {
+    expect(collectLeaves(layoutForSessions([]))).toEqual([null]);
   });
 
   it('walks nested splits', () => {

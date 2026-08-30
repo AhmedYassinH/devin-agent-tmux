@@ -12,7 +12,35 @@ import {
   makeId,
   STORE_VERSION,
 } from './models.js';
-import { clearSession, firstEmptyLeafIndex, setLeafAt, templateLayout, type TemplateName } from './layout.js';
+import { firstEmptyLeafIndex, layoutForSessions, setLeafAt, templateLayout, type TemplateName } from './layout.js';
+
+/**
+ * Last path segment — used to name a workspace after the directory it opens.
+ * Falls back rather than returning empty, because a workspace with no name is
+ * unclickable in the sidebar.
+ */
+export function dirBasename(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  const last = trimmed.split('/').pop();
+  return last && last !== '~' ? last : 'workspace';
+}
+
+/**
+ * A workspace name not already taken: "app", then "app 2", "app 3"…
+ *
+ * Imports create a workspace per session, so importing three conversations from
+ * one repo would otherwise produce three identically-named rows in the sidebar.
+ */
+export function uniqueWorkspaceName(state: AppState, base: string): string {
+  const taken = new Set(Object.values(state.workspaces).map((ws) => ws.name));
+  if (!taken.has(base)) return base;
+  // Bounded by the number of existing workspaces: one of these must be free.
+  for (let n = 2; n <= taken.size + 2; n += 1) {
+    const candidate = `${base} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base} ${Date.now()}`;
+}
 
 export function createWorkspace(state: AppState, name: string, cwd: string, template: TemplateName = '1x2'): AppState {
   const id = makeId('ws');
@@ -97,16 +125,21 @@ export function addSession(state: AppState, wsId: string, session: SessionConfig
   });
 }
 
+/**
+ * Close a pane and SHRINK the grid to what is left.
+ *
+ * The alternative — blanking the leaf and keeping the slot — leaves an empty
+ * launcher sitting where the terminal was, and makes the Terminals count
+ * disagree with the number of panes actually on screen. Reshaping costs the
+ * divider positions, which is the right thing to lose when the grid changes
+ * shape anyway.
+ */
 export function removeSession(state: AppState, wsId: string, sessionId: string): AppState {
   return patch(state, wsId, (ws) => {
     const sessions = { ...ws.sessions };
     delete sessions[sessionId];
-    return {
-      ...ws,
-      sessions,
-      sessionOrder: ws.sessionOrder.filter((s) => s !== sessionId),
-      layout: clearSession(ws.layout, sessionId),
-    };
+    const sessionOrder = ws.sessionOrder.filter((s) => s !== sessionId);
+    return { ...ws, sessions, sessionOrder, layout: layoutForSessions(sessionOrder) };
   });
 }
 

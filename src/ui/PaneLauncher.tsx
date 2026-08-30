@@ -1,17 +1,23 @@
 /**
  * The empty-slot launcher. This is the screen the whole port exists to change:
- * Chorus offered "Run Claude"; this offers Devin, with Devin's own four-rung
- * permission ladder rather than Claude's binary skip-or-not.
+ * Chorus offered "Run Claude"; this offers Devin.
+ *
+ * Deliberately minimal. Model, first prompt and permission mode are NOT here
+ * even though the CLI accepts all three, because the pane is the real `devin`
+ * TUI: you pick a model with `/model`, type your first message at the prompt,
+ * and cycle permissions with `Shift+Tab`. Duplicating those in a launch form
+ * gives two ways to do one thing and two places to fall out of sync — and the
+ * form's copy goes stale the moment Devin ships a new model or mode.
+ *
+ * What remains is what the TUI genuinely cannot change after the fact: the
+ * working directory the process is spawned in, plus a label for our sidebar.
  */
 import { useState } from 'react';
-import { PERMISSION_MODES, type DevinPermissionMode } from '../core/models.js';
 
 export interface LaunchRequest {
   name?: string;
   cwd: string;
-  model?: string;
-  permissionMode: DevinPermissionMode;
-  prompt?: string;
+  /** Launch a plain shell instead of devin — the escape hatch pane. */
   shellOnly?: boolean;
 }
 
@@ -26,19 +32,9 @@ export function PaneLauncher({
 }) {
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState(defaultCwd);
-  const [model, setModel] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [permissionMode, setPermissionMode] = useState<DevinPermissionMode>('auto');
 
   const launch = (shellOnly: boolean) =>
-    onLaunch({
-      name: name.trim() || undefined,
-      cwd: cwd.trim() || defaultCwd,
-      model: model.trim() || undefined,
-      prompt: prompt.trim() || undefined,
-      permissionMode,
-      shellOnly,
-    });
+    onLaunch({ name: name.trim() || undefined, cwd: cwd.trim() || defaultCwd, shellOnly });
 
   return (
     <div className="launcher">
@@ -51,39 +47,24 @@ export function PaneLauncher({
           <span>Working directory</span>
           <input value={cwd} onChange={(e) => setCwd(e.target.value)} spellCheck={false} />
         </label>
-        <label>
-          <span>Model</span>
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="default (e.g. opus, codex)" />
-        </label>
-        <label>
-          <span>Permissions</span>
-          <select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value as DevinPermissionMode)}>
-            {PERMISSION_MODES.map((m) => (
-              <option key={m.value} value={m.value} title={m.hint}>
-                {m.label} — {m.hint}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="wide">
-          <span>First prompt</span>
-          <input
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="optional — auto-submits, session stays interactive"
-          />
-        </label>
       </div>
 
       <div className="launcher-actions">
         <button className="primary" onClick={() => launch(false)}>
           Run Devin
         </button>
-        <button onClick={onImport}>Resume a session…</button>
-        <button className="ghost" onClick={() => launch(true)}>
+        <button className="secondary" onClick={onImport}>
+          Resume a session…
+        </button>
+        <button className="secondary" onClick={() => launch(true)}>
           Shell
         </button>
       </div>
+
+      <small className="muted">
+        Starts with edits auto-approved. Inside the pane, <code>Shift+Tab</code> cycles the
+        permission mode and <code>/model</code> switches model.
+      </small>
     </div>
   );
 }

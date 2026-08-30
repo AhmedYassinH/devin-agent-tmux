@@ -99,12 +99,19 @@ export function TracePanel({
   return (
     <aside className="trace">
       <header>
-        <div>
+        {/* cert-seal: one of red's three sanctioned uses in this design language */}
+        {summary && (
+          <div className="seal" title={`${summary.tools} tool calls in this session`}>
+            <b>{summary.tools}</b>
+            <span>Tool calls</span>
+          </div>
+        )}
+        <div className="spacer">
           <h3>{trace?.title || sessionId}</h3>
           {summary && (
-            <p className="muted small">
-              {summary.turns} turns · {summary.tools} tool calls
-              {summary.failed > 0 && <span className="failed"> · {summary.failed} failed</span>}
+            <p className="small">
+              {summary.turns} turns
+              {summary.failed > 0 && <span className="failed"> &middot; {summary.failed} failed</span>}
             </p>
           )}
         </div>
